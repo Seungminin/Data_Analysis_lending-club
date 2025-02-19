@@ -1,2 +1,5 @@
 ## Dataset/ dataset 하위 파일들 생략
 Dataset/
+
+##requirements text file 지우기
+requirements.txt
