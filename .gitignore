@@ -3,3 +3,6 @@ Dataset/
 
 ##requirements text file 지우기
 requirements.txt
+
+##.csv파일 모두 지우기
+*.csv
