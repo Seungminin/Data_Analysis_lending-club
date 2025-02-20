@@ -159,7 +159,7 @@ def main(_):
                 OPTION = 1
             
             #generate_data(sess, tablegan, FLAGS, OPTION)
-            generate_data(sess, tablegan, config = FLAGS, option=1, num_samples=1000000)  # Generate exactly 1K samples
+            generate_data(sess, tablegan, config = FLAGS, option=1, num_samples=500000)  # Generate exactly 1K samples
             print('Time Elapsed: ')
             b = datetime.datetime.now()
             print(b - a)
