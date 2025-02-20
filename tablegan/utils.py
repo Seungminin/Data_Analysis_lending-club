@@ -23,6 +23,9 @@ import pickle
 import pandas as pd
 
 import gc
+#메모리 증가
+import sys
+sys.setrecursionlimit(10**6)
 
 pp = pprint.PrettyPrinter()
 
@@ -288,18 +291,30 @@ def nearest_value(array, value):
     return array[idx]
 
 
-def rounding(fake, real, column_list):
+def rounding(fake, real, column_list, batch_size=10000):
     for i in column_list:
-        print(f"Rounding column: {i} 🚀 (속도 최적화 적용)")
-        
-        # ✅ KDTree 구축 (real 값 기준)
+        print(f"Rounding column: {i} 🚀 (배치 처리 적용)")
+
+        # ✅ KDTree 생성
         tree = cKDTree(real[:, i].reshape(-1, 1))
-        
-        # ✅ fake 값과 가장 가까운 real 값의 인덱스 검색
-        _, indices = tree.query(fake[:, i].reshape(-1, 1))
-        
-        # ✅ 가장 가까운 real 값으로 대체
-        fake[:, i] = real[indices, i]
+
+        num_samples = fake.shape[0]
+        rounded_col = np.zeros(num_samples)
+
+        # ✅ 배치 처리
+        for start in range(0, num_samples, batch_size):
+            end = min(start + batch_size, num_samples)
+            batch = fake[start:end, i].reshape(-1, 1)
+
+            # 🔍 가장 가까운 값 인덱스 찾기
+            _, indices = tree.query(batch)
+            rounded_col[start:end] = real[indices, i]
+
+            print(f"📝 Batch {start // batch_size + 1}/{(num_samples - 1) // batch_size + 1} 처리 완료")
+
+        # ✅ fake 배열에 반영
+        fake[:, i] = rounded_col
+
     return fake
 
 
