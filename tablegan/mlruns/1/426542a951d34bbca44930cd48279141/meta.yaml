@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/tablegan/mlruns/1/426542a951d34bbca44930cd48279141/artifacts
+end_time: 1740041392657
+entry_point_name: ''
+experiment_id: '1'
+lifecycle_stage: active
+name: ''
+run_id: 426542a951d34bbca44930cd48279141
+run_uuid: 426542a951d34bbca44930cd48279141
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1740038712966
+status: 3
+tags: []
+user_id: GCU

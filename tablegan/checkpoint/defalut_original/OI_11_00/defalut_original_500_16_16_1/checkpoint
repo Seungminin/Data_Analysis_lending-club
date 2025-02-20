@@ -1,0 +1,5 @@
+model_checkpoint_path: "tableGAN_model-3002"
+all_model_checkpoint_paths: "..\\defalut_original_500_16_16\\tableGAN_model-2"
+all_model_checkpoint_paths: "tableGAN_model-1002"
+all_model_checkpoint_paths: "tableGAN_model-2002"
+all_model_checkpoint_paths: "tableGAN_model-3002"

@@ -11,6 +11,7 @@ import scipy.misc
 import numpy as np
 from time import gmtime, strftime
 from six.moves import xrange
+from scipy.spatial import cKDTree
 
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
@@ -288,12 +289,17 @@ def nearest_value(array, value):
 
 
 def rounding(fake, real, column_list):
-    # max_row = min( fake.shape[0], real.shape[0])
-
     for i in column_list:
-        print("Rounding column: " + str(i))
-        fake[:, i] = np.array([nearest_value(real[:, i], x) for x in fake[:, i]])
-
+        print(f"Rounding column: {i} 🚀 (속도 최적화 적용)")
+        
+        # ✅ KDTree 구축 (real 값 기준)
+        tree = cKDTree(real[:, i].reshape(-1, 1))
+        
+        # ✅ fake 값과 가장 가까운 real 값의 인덱스 검색
+        _, indices = tree.query(fake[:, i].reshape(-1, 1))
+        
+        # ✅ 가장 가까운 real 값으로 대체
+        fake[:, i] = real[indices, i]
     return fake
 
 
@@ -321,168 +327,111 @@ def compare(real, fake, save_dir, col_prefix, CDF=True, Hist=True):
         print(col_prefix + " : Cumulative Dist of Col " + str(i + 1))
 
 
-def generate_data(sess, model, config, option):
-    print("Start Generatig Data .... ")
-    image_frame_dim = int(math.ceil(config.batch_size ** .5))
+def generate_data(sess, model, config, option, num_samples=1000000):
+
+    print("🚀 Start Generating Data...")
 
     if option == 1:
+        # ✅ 샘플 수 및 배치 계산
+        input_size = num_samples
+        dim = config.output_width
+        batch_size = config.batch_size
 
-        input_size = len(model.data_X)
+        total_batches = math.ceil(input_size / batch_size)
+        actual_samples = total_batches * batch_size
 
-        dim = config.output_width  # 8
+        print(f"🔢 요청 샘플 수: {input_size}, 실제 생성 샘플 수 (배치 맞춤): {actual_samples}")
 
-        merged_data = np.ndarray([config.batch_size * (input_size // config.batch_size), dim, dim],
-                                 dtype=float)  # 64 * 234 * 16 * 16
+        # ✅ 결과 배열 초기화
+        merged_data = np.zeros((actual_samples, dim, dim), dtype=float)
 
-        save_dir = './{}'.format(config.sample_dir + "/" + config.dataset)  # config.test_id)
+        save_dir = f'./{config.sample_dir}/{config.dataset}'
+        os.makedirs(save_dir, exist_ok=True)
 
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
+        for idx in range(total_batches):
+            print(f"📦 Generating batch {idx + 1}/{total_batches}")
 
-            # save_dir = save_dir + "/" + config.test_id
+            # ⭐ 마지막 배치 샘플 수 조정
+            samples_to_generate = batch_size if idx < total_batches - 1 else input_size - (idx * batch_size)
 
-        # if not os.path.exists(save_dir):
-        #       os.makedirs(save_dir)
+            z_sample = np.random.uniform(-1, 1, size=(samples_to_generate, model.z_dim))
+            zero_labels = model.zero_one_ratio
 
-        # samples_dir = save_dir + '/samples'
-        #
-        # if not os.path.exists(samples_dir):
-        #       os.makedirs(samples_dir)
-
-        for idx in xrange(input_size // config.batch_size):
-            print(" [*] %d" % idx)
-            z_sample = np.random.uniform(-1, 1, size=(config.batch_size, model.z_dim))
-
-            zero_labeles = model.zero_one_ratio
-
-            # if config.dataset == "LACity":
-            #   zero_labeles= 0.48       # Based the ratio of labels in initial dataset
-            #
-            # elif config.dataset == "Health":
-            #   zero_labeles= 0.91          # Based the ratio of labels in initial dataset
-            #
-            # elif config.dataset == "Adult":
-            #   # Total =32561 ,  0s = 22980  = 70.6%
-            #   zero_labeles= 0.706       # Based the ratio of labels in initial dataset
-            #
-            # elif config.dataset == "Ticket":
-            #   # Total =80000
-            #   zero_labeles= 0.575 # Based the ratio of labels in initial dataset
-
-            y = np.ones((config.batch_size, 1))
-
-            y[: int(zero_labeles * config.batch_size)] = 0
+            y = np.ones((samples_to_generate, 1))
+            y[:int(zero_labels * samples_to_generate)] = 0
             np.random.shuffle(y)
 
-            print("y shape " + str(y.shape))
             y = y.astype('int16')
+            y_one_hot = np.zeros((samples_to_generate, model.y_dim))
+            y_one_hot[np.arange(samples_to_generate), y.flatten()] = 1
 
-            y_one_hot = np.zeros((config.batch_size, model.y_dim))
+            samples = sess.run(
+                model.sampler,
+                feed_dict={model.z: z_sample, model.y: y_one_hot, model.y_normal: y}
+            )
 
-            # y indicates the index of ones in y_one_hot : in this case y_dim =2 so indexe are 0 or 1
-            y_one_hot[np.arange(config.batch_size), y] = 1
+            # ✅ 생성된 샘플 병합
+            start_idx = idx * batch_size
+            end_idx = start_idx + samples_to_generate
+            merged_data[start_idx:end_idx] = samples.reshape(samples_to_generate, dim, dim)
 
-            samples = sess.run(model.sampler, feed_dict={model.z: z_sample, model.y: y_one_hot, model.y_normal: y})
+        # ✅ 최종 데이터 변환 및 샘플 자르기
+        fake_data = merged_data[:input_size].reshape(input_size, dim * dim)
+        fake_data = fake_data[:, :model.attrib_num]  # (1000000, 65)
+        print(f"✅ Fake Data shape: {fake_data.shape}")
 
-            # Merging Data for each batch size
-            merged_data[idx * config.batch_size: (idx + 1) * config.batch_size] = samples.reshape(samples.shape[0],
-                                                                                                  samples.shape[1],
-                                                                                                  samples.shape[
-                                                                                                      2])  # 234 * 64 * 16 *16
-
-        # All generated data is ready in merged_data , now reshape it to a tabular marix
-
-        fake_data = merged_data.reshape(merged_data.shape[0], merged_data.shape[1] * merged_data.shape[2])
-
-        # Selecting the correct number of atributes (used in training)
-        fake_data = fake_data[:, : model.attrib_num]
-
-        print(" Fake Data shape= " + str(fake_data.shape))
-
-        origin_data_path = model.train_data_path  # './data/'+ config.dataset+ '/train_'+ config.dataset + '_cleaned'
-
+        # ✅ 원본 데이터 로드
+        origin_data_path = model.train_data_path
         if os.path.exists(origin_data_path + ".csv"):
-            origin_data = pd.read_csv(origin_data_path + ".csv", sep=';')
-
+            print(f"📥 Loading CSV input file: {origin_data_path}.csv")
+            origin_data = pd.read_csv(origin_data_path + ".csv", sep=',')  # ✅ 수정됨
+            origin_data = origin_data.apply(pd.to_numeric, errors='coerce').fillna(0)  # 숫자 변환 및 NaN 처리
         elif os.path.exists(origin_data_path + ".pickle"):
             with open(origin_data_path + '.pickle', 'rb') as handle:
                 origin_data = pickle.load(handle)
         else:
-            print("Error Loading Dataset !!")
+            print("❌ Error: 원본 데이터 로드 실패")
             exit(1)
 
+        # ✅ 데이터 스케일링
         min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
-
-        min_max_scaler.fit(origin_data)
-
-        # Fake Gen --> Scaling --> Rounding --> 1) Classification , 2)-->Normalizaing --> ( Euclidian Distance, CDF)
-        # transforming data back to original scale
+        min_max_scaler.fit(origin_data.values)
         scaled_fake = min_max_scaler.inverse_transform(fake_data)
 
-        # Rounding Data
-        round_columns = range(scaled_fake.shape[1])
+        # ✅ 데이터 반올림 및 저장
+        round_scaled_fake = rounding(scaled_fake, origin_data.values, range(scaled_fake.shape[1]))
+        output_path = f'{save_dir}/{config.dataset}_{config.test_id}_fake.csv'
+        print("fake 파일 만들어지는 중")
+        pd.DataFrame(round_scaled_fake).to_csv(output_path, index=False, sep=',')
 
-        round_scaled_fake = rounding(scaled_fake, origin_data.as_matrix(), round_columns)
+        print(f"✅ Generated Data shape: {round_scaled_fake.shape}")
+        print(f"💾 파일 저장 완료: {output_path}")
 
-        # Required for Classification NN evaluation only
-        # save_data(round_scaled_fake , save_dir +'/' + config.test_id + "_scaled_fake_tabular.pickle" )
+    elif option == 5:  # Results for ShadowGAN (membership attack)
+        save_dir = f'./{config.sample_dir}/{config.dataset}'
+        os.makedirs(save_dir, exist_ok=True)
 
-        rsf_out = pd.DataFrame(round_scaled_fake)
-
-        rsf_out.to_csv(f'{save_dir}/{config.dataset}_{config.test_id}_fake.csv' , index=False, sep=';')
-
-        print("Generated Data shape = " + str(round_scaled_fake.shape))
-
-    elif option == 5:  # Results for ShadowGAN (memberhsip attack).
-
-        # input is data_x which is the fake data/test data/train data
-
-        save_dir = './{}'.format(config.sample_dir + "/" + config.dataset)
-
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-
-            # Applying Discriminator to Fake Data
         if config.shgan_input_type == 1:
-
-            with open(
-                    './samples/' + config.dataset + '/' + config.test_id + '/' + config.test_id + '_scaled_fake_tabular.pickle',
-                    'rb') as handle:
+            with open(f'./samples/{config.dataset}/{config.test_id}/{config.test_id}_scaled_fake_tabular.pickle', 'rb') as handle:
                 data_x = pickle.load(handle)
-
-            output_file = os.path.join(save_dir, config.dataset + '_' + config.test_id + '_atk_fake_data.csv')
-
+            output_file = f'{save_dir}/{config.dataset}_{config.test_id}_atk_fake_data.csv'
             discriminator_sampling(data_x, [], output_file, 'In', config, model, sess)
 
         elif config.shgan_input_type == 2:
-            # Applying Test Data to Shadow GAN
-
-            with open('./data/' + config.dataset + '/test_' + config.dataset + '_cleaned.pickle', 'rb') as handle:
+            with open(f'./data/{config.dataset}/test_{config.dataset}_cleaned.pickle', 'rb') as handle:
                 data_x = pickle.load(handle)
-
-            with open('./data/' + config.dataset + '/test_' + config.dataset + '_labels.pickle', 'rb') as handle:
+            with open(f'./data/{config.dataset}/test_{config.dataset}_labels.pickle', 'rb') as handle:
                 data_y = pickle.load(handle)
-
-            data_y = data_y.reshape(-1, 1)
-
-            output_file = os.path.join(save_dir, config.dataset + '_' + config.test_id + '_atk_test_data.csv')
-
-            discriminator_sampling(data_x, data_y, output_file, 'Out', config, model, sess)
+            output_file = f'{save_dir}/{config.dataset}_{config.test_id}_atk_test_data.csv'
+            discriminator_sampling(data_x, data_y.reshape(-1, 1), output_file, 'Out', config, model, sess)
 
         elif config.shgan_input_type == 3:
-            # Applying Original Train Data to Shadow GAN
-
-            with open('./data/' + config.dataset + '/train_' + config.dataset + '_cleaned.pickle', 'rb') as handle:
+            with open(f'./data/{config.dataset}/train_{config.dataset}_cleaned.pickle', 'rb') as handle:
                 data_x = pickle.load(handle)
-
-            with open('./data/' + config.dataset + '/train_' + config.dataset + '_labels.pickle', 'rb') as handle:
+            with open(f'./data/{config.dataset}/train_{config.dataset}_labels.pickle', 'rb') as handle:
                 data_y = pickle.load(handle)
-
-            data_y = data_y.reshape(-1, 1)
-
-            output_file = os.path.join(save_dir, config.dataset + '_' + config.test_id + '_atk_train_data.csv')
-
-            discriminator_sampling(data_x, data_y, output_file, '', config, model, sess)
+            output_file = f'{save_dir}/{config.dataset}_{config.test_id}_atk_train_data.csv'
+            discriminator_sampling(data_x, data_y.reshape(-1, 1), output_file, '', config, model, sess)
 
 
 def discriminator_sampling(input, lables, output_file, title, config, dcgan, sess):
