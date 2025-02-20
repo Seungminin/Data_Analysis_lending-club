@@ -809,54 +809,61 @@ class TableGan(object):
         return self.load_tabular_data(self.dataset_name, self.input_height, self.y_dim, self.test_id, load_fake_data)
 
     def load_tabular_data(self, dataset_name, dim, classes=2, test_id='', load_fake_data=False):
-
-        # self.train_data_path = f"./data/{dataset_name}/{dataset_name}"
         self.train_data_path = f'data/{dataset_name}/{dataset_name}'
         self.train_label_path = f'data/{dataset_name}/{dataset_name}_labels'
 
         if os.path.exists(self.train_data_path + ".csv"):
-
-            X = pd.read_csv(self.train_data_path + ".csv", sep=';')
-            print("Loading CSV input file : %s" % (self.train_data_path + ".csv"))
-
-            self.attrib_num = X.shape[1]
+            print(f"📥 Loading CSV input file: {self.train_data_path}.csv")
+            try:
+                X = pd.read_csv(self.train_data_path + ".csv", sep=',', quotechar='"', engine='python')
+                
+                # ✅ 문자열 문제 해결: 쉼표 포함된 문자열 숫자로 변환
+                X = X.applymap(lambda val: float(val.replace(',', '')) if isinstance(val, str) else val)
+                
+                self.attrib_num = X.shape[1]
+            except Exception as e:
+                print(f"❌ CSV 로딩 실패: {e}")
+                exit(1)
 
             if self.y_dim:
-                y = np.genfromtxt(open(self.train_label_path + ".csv", 'r'), delimiter=',')
-
-                print("Loading CSV input file : %s" % (self.train_label_path + ".csv"))
-
-                self.zero_one_ratio = 1.0 - (np.sum(y) / len(y))
+                try:
+                    y = pd.read_csv(self.train_label_path + ".csv", header=None)
+                    y = pd.to_numeric(y.squeeze(), errors='coerce').fillna(0).astype(int).values
+                    print(f"📥 Loading CSV label file: {self.train_label_path}.csv")
+                    self.zero_one_ratio = 1.0 - (np.sum(y) / len(y))
+                except Exception as e:
+                    print(f"❌ 라벨 로딩 실패: {e}")
+                    exit(1)
 
         elif os.path.exists(self.train_data_path + ".pickle"):
             with open(self.train_data_path + '.pickle', 'rb') as handle:
                 X = pickle.load(handle)
-
             with open(self.train_label_path + '.pickle', 'rb') as handle:
                 y = pickle.load(handle)
+            print("📥 Loading pickle files...")
 
-            print("Loading pickle file ....")
         else:
-            print("Error Loading Dataset !!")
+            print("❌ Error: Dataset not found!")
             exit(1)
 
+        # ✅ MinMax Scaling
         min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
+        try:
+            X = pd.DataFrame(min_max_scaler.fit_transform(X))
+        except Exception as e:
+            print(f"❌ 스케일링 오류: {e}")
+            exit(1)
 
-        # Normalizing Initial Data
-        X = pd.DataFrame(min_max_scaler.fit_transform(X))
-        # X is [rows * config.attrib_num] 15000 * 23
-
+        # ✅ 패딩 및 리쉐이핑 처리
         padded_ar = padding_duplicating(X, dim * dim)
-
         X = reshape(padded_ar, dim)
-
-        print("Final Real Data shape = " + str(X.shape))  # 15000 * 8 * 8
+        print(f"✅ Final Data Shape: {X.shape}")
 
         if self.y_dim:
             y = y.reshape(y.shape[0], -1).astype(np.int16)
-            y_onehot = np.zeros((len(y), classes), dtype=np.float)
+            y_onehot = np.zeros((len(y), classes), dtype=np.float32)
             for i, lbl in enumerate(y):
-                y_onehot[i, y[i]] = 1.0
+                y_onehot[i, lbl] = 1.0
             return X, y_onehot, y
 
         return X, None, None
