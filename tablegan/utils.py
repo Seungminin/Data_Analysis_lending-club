@@ -19,13 +19,15 @@ import os
 import matplotlib.pyplot as plt
 
 from sklearn import preprocessing
+from sklearn.preprocessing import LabelEncoder
+
 import pickle
 import pandas as pd
 
 import gc
 #메모리 증가
 import sys
-sys.setrecursionlimit(10**6)
+#sys.setrecursionlimit(10**6)
 
 pp = pprint.PrettyPrinter()
 
@@ -291,32 +293,49 @@ def nearest_value(array, value):
     return array[idx]
 
 
-def rounding(fake, real, column_list, batch_size=10000):
-    for i in column_list:
-        print(f"Rounding column: {i} 🚀 (배치 처리 적용)")
+def rounding(fake, real, batch_size=10000):
+    """
+    범주형 데이터를 Label Encoding 후 복원하고, 연속형 데이터를 가장 가까운 값으로 반올림하는 함수.
 
-        # ✅ KDTree 생성
-        tree = cKDTree(real[:, i].reshape(-1, 1))
+    Parameters:
+    - fake (numpy.ndarray): 생성된 가짜 데이터
+    - real (numpy.ndarray): 원본 데이터
+    - batch_size (int): 배치 단위 처리 크기 (기본값: 10,000)
 
-        num_samples = fake.shape[0]
-        rounded_col = np.zeros(num_samples)
+    Returns:
+    - fake (numpy.ndarray): 범주형 데이터 복원 및 연속형 데이터 반올림된 가짜 데이터
+    """
 
-        # ✅ 배치 처리
-        for start in range(0, num_samples, batch_size):
-            end = min(start + batch_size, num_samples)
-            batch = fake[start:end, i].reshape(-1, 1)
+    # ✅ Categorical 컬럼 찾기 (문자열 또는 카테고리형 데이터)
+    categorical_cols = real.select_dtypes(include=['object', 'category']).columns.tolist()
 
-            # 🔍 가장 가까운 값 인덱스 찾기
-            _, indices = tree.query(batch)
-            rounded_col[start:end] = real[indices, i]
+    # ✅ Continuous 컬럼 찾기 (숫자형 데이터)
+    continuous_cols = real.select_dtypes(exclude=['object', 'category']).columns.tolist()
 
-            print(f"📝 Batch {start // batch_size + 1}/{(num_samples - 1) // batch_size + 1} 처리 완료")
+    # ✅ Label Encoding 적용 (범주형 데이터 변환)
+    encoders = {col: LabelEncoder().fit(real[col]) for col in categorical_cols}
 
-        # ✅ fake 배열에 반영
-        fake[:, i] = rounded_col
+    for col in categorical_cols:
+        print(f"🔄 Label Encoding: {col}")
+        fake[:, col] = encoders[col].inverse_transform(encoders[col].transform(fake[:, col].astype(str)))
+
+    # ✅ 연속형 데이터에 대해 반올림 적용 (`searchsorted` 사용)
+    for i, col in enumerate(continuous_cols):
+        print(f"⚡ Fast rounding column: {col}")
+
+        # ✅ 원본 데이터 정렬 (정렬 O(M log M))
+        unique_values = np.sort(np.unique(real[col].values))
+
+        # ✅ 이진 탐색을 통한 가장 가까운 값 찾기 (O(N log log M))
+        indices = np.searchsorted(unique_values, fake[:, i], side="left")
+
+        # ✅ 경계값 처리 (인덱스 범위 초과 방지)
+        indices = np.clip(indices, 0, len(unique_values) - 1)
+
+        # ✅ 가장 가까운 값으로 대체
+        fake[:, i] = unique_values[indices]
 
     return fake
-
 
 def compare(real, fake, save_dir, col_prefix, CDF=True, Hist=True):
     if not os.path.exists(save_dir):
@@ -414,7 +433,7 @@ def generate_data(sess, model, config, option, num_samples=1000000):
         scaled_fake = min_max_scaler.inverse_transform(fake_data)
 
         # ✅ 데이터 반올림 및 저장
-        round_scaled_fake = rounding(scaled_fake, origin_data.values, range(scaled_fake.shape[1]))
+        round_scaled_fake = rounding(scaled_fake, origin_data.values)
         output_path = f'{save_dir}/{config.dataset}_{config.test_id}_fake.csv'
         print("fake 파일 만들어지는 중")
         pd.DataFrame(round_scaled_fake).to_csv(output_path, index=False, sep=',')
