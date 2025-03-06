@@ -293,49 +293,62 @@ def nearest_value(array, value):
     return array[idx]
 
 
-def rounding(fake, real, batch_size=10000):
+def rounding(fake, real, batch_size=100000):
     """
-    범주형 데이터를 Label Encoding 후 복원하고, 연속형 데이터를 가장 가까운 값으로 반올림하는 함수.
+    1️⃣ 연속형 데이터 반올림 (배치 적용)
+    2️⃣ 범주형 데이터(Label Encoding 된 데이터) 복원
 
     Parameters:
     - fake (numpy.ndarray): 생성된 가짜 데이터
-    - real (numpy.ndarray): 원본 데이터
-    - batch_size (int): 배치 단위 처리 크기 (기본값: 10,000)
+    - real (pandas.DataFrame): 원본 데이터 (반올림 대상)
+    - batch_size (int): 배치 단위 처리 크기 (기본값: 100,000)
 
     Returns:
-    - fake (numpy.ndarray): 범주형 데이터 복원 및 연속형 데이터 반올림된 가짜 데이터
+    - fake (numpy.ndarray): 반올림 및 범주형 복원된 가짜 데이터
     """
 
-    # ✅ Categorical 컬럼 찾기 (문자열 또는 카테고리형 데이터)
-    categorical_cols = real.select_dtypes(include=['object', 'category']).columns.tolist()
+    continuous_cols = real.select_dtypes(include=[np.number]).columns.tolist()
+    num_samples = fake.shape[0]
 
-    # ✅ Continuous 컬럼 찾기 (숫자형 데이터)
-    continuous_cols = real.select_dtypes(exclude=['object', 'category']).columns.tolist()
+    for i, col in enumerate(continuous_cols):
+        print(f"⚡ Fast rounding column: {col} (Batch Processing)")
 
-    # ✅ Label Encoding 적용 (범주형 데이터 변환)
+        # ✅ 원본 데이터 정렬 (O(M log M))
+        unique_values = np.sort(real[col].unique())
+
+        # ✅ 배치 단위로 연속형 데이터 처리
+        num_batches = math.ceil(num_samples / batch_size)
+
+        for batch_idx in range(num_batches):
+            start = batch_idx * batch_size
+            end = min((batch_idx + 1) * batch_size, num_samples)
+
+            batch = fake[start:end, i]  # 배치 크기만큼 슬라이싱
+
+            # ✅ 이진 탐색을 통한 가장 가까운 값 찾기 (O(N log log M))
+            indices = np.searchsorted(unique_values, batch, side="left")
+
+            # ✅ 경계값 처리 (인덱스 범위 초과 방지)
+            indices = np.clip(indices, 0, len(unique_values) - 1)
+
+            # ✅ 가장 가까운 값으로 대체
+            fake[start:end, i] = unique_values[indices]
+
+            print(f"📝 Batch {batch_idx + 1}/{num_batches} processed ({start} ~ {end} indices)")
+
+    # ✅ 범주형(Categorical) 컬럼 찾기
+    categorical_cols = real.select_dtypes(exclude=[np.number]).columns.tolist()
+
+    # ✅ Label Encoding 복원 수행
     encoders = {col: LabelEncoder().fit(real[col]) for col in categorical_cols}
 
     for col in categorical_cols:
-        print(f"🔄 Label Encoding: {col}")
-        fake[:, col] = encoders[col].inverse_transform(encoders[col].transform(fake[:, col].astype(str)))
-
-    # ✅ 연속형 데이터에 대해 반올림 적용 (`searchsorted` 사용)
-    for i, col in enumerate(continuous_cols):
-        print(f"⚡ Fast rounding column: {col}")
-
-        # ✅ 원본 데이터 정렬 (정렬 O(M log M))
-        unique_values = np.sort(np.unique(real[col].values))
-
-        # ✅ 이진 탐색을 통한 가장 가까운 값 찾기 (O(N log log M))
-        indices = np.searchsorted(unique_values, fake[:, i], side="left")
-
-        # ✅ 경계값 처리 (인덱스 범위 초과 방지)
-        indices = np.clip(indices, 0, len(unique_values) - 1)
-
-        # ✅ 가장 가까운 값으로 대체
-        fake[:, i] = unique_values[indices]
+        print(f"🔄 Restoring categorical column: {col}")
+        fake[:, col] = encoders[col].inverse_transform(fake[:, col].astype(int))  # 🚀 int로 변환 후 복원
 
     return fake
+
+
 
 def compare(real, fake, save_dir, col_prefix, CDF=True, Hist=True):
     if not os.path.exists(save_dir):
@@ -419,6 +432,7 @@ def generate_data(sess, model, config, option, num_samples=1000000):
         if os.path.exists(origin_data_path + ".csv"):
             print(f"📥 Loading CSV input file: {origin_data_path}.csv")
             origin_data = pd.read_csv(origin_data_path + ".csv", sep=',')  # ✅ 수정됨
+            real_columns = origin_data.columns.to_list()
             origin_data = origin_data.apply(pd.to_numeric, errors='coerce').fillna(0)  # 숫자 변환 및 NaN 처리
         elif os.path.exists(origin_data_path + ".pickle"):
             with open(origin_data_path + '.pickle', 'rb') as handle:
@@ -427,16 +441,28 @@ def generate_data(sess, model, config, option, num_samples=1000000):
             print("❌ Error: 원본 데이터 로드 실패")
             exit(1)
 
-        # ✅ 데이터 스케일링
         min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
         min_max_scaler.fit(origin_data.values)
         scaled_fake = min_max_scaler.inverse_transform(fake_data)
 
-        # ✅ 데이터 반올림 및 저장
         round_scaled_fake = rounding(scaled_fake, origin_data.values)
+        # ✅ `round_scaled_fake`의 컬럼 개수와 `real_columns` 개수 맞추기
+        if round_scaled_fake.shape[1] != len(real_columns):
+            print(f"⚠️ Warning: Column size mismatch! Fake: {round_scaled_fake.shape[1]}, Original: {len(real_columns)}")
+            print("⚠️ Adjusting column count by trimming or padding.")
+
+            # ✅ 컬럼 개수 맞추기 (초과 컬럼 제거)
+            if round_scaled_fake.shape[1] > len(real_columns):
+                round_scaled_fake = round_scaled_fake[:, :len(real_columns)]
+            elif round_scaled_fake.shape[1] < len(real_columns):
+                real_columns = real_columns[:round_scaled_fake.shape[1]]  # 컬럼 개수 줄이기
+        
         output_path = f'{save_dir}/{config.dataset}_{config.test_id}_fake.csv'
-        print("fake 파일 만들어지는 중")
-        pd.DataFrame(round_scaled_fake).to_csv(output_path, index=False, sep=',')
+        print("Generation fake data")
+
+        round_scaled_fake_df = pd.DataFrame(round_scaled_fake, columns=real_columns)
+        print("📥 Saving fake data as CSV...")
+        round_scaled_fake_df.to_csv(output_path, index=False, sep=',')
 
         print(f"✅ Generated Data shape: {round_scaled_fake.shape}")
         print(f"💾 파일 저장 완료: {output_path}")
