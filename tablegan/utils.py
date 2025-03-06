@@ -296,21 +296,31 @@ def nearest_value(array, value):
 def rounding(fake, real, batch_size=100000):
     """
     1️⃣ 연속형 데이터 반올림 (배치 적용)
-    2️⃣ 범주형 데이터(Label Encoding 된 데이터) 복원
+    2️⃣ 범주형 데이터(Label Encoding 후 가장 가까운 값 매칭 후 복원)
 
     Parameters:
     - fake (numpy.ndarray): 생성된 가짜 데이터
-    - real (pandas.DataFrame): 원본 데이터 (반올림 대상)
+    - real (pandas.DataFrame): 원본 데이터 (반올림 및 복원 대상)
     - batch_size (int): 배치 단위 처리 크기 (기본값: 100,000)
 
     Returns:
     - fake (numpy.ndarray): 반올림 및 범주형 복원된 가짜 데이터
     """
 
-    continuous_cols = real.select_dtypes(include=[np.number]).columns.tolist()
-    num_samples = fake.shape[0]
+    # ✅ `real`이 numpy.ndarray로 변환된 경우, DataFrame으로 변환
+    if isinstance(real, np.ndarray):
+        print("⚠️ Warning: real 데이터가 numpy 배열로 변환됨 → DataFrame으로 복원")
+        real = pd.DataFrame(real)
 
-    for i, col in enumerate(continuous_cols):
+    num_samples, num_features = fake.shape
+
+    # ✅ 연속형(Continuous) 및 범주형(Categorical) 컬럼 찾기
+    continuous_cols = real.select_dtypes(include=[np.number]).columns.tolist()
+    categorical_cols = real.select_dtypes(exclude=[np.number]).columns.tolist()
+
+    # ✅ 연속형 데이터 반올림 적용 (배치 처리)
+    for col in continuous_cols:
+        i = real.columns.get_loc(col)  # 컬럼 인덱스 찾기
         print(f"⚡ Fast rounding column: {col} (Batch Processing)")
 
         # ✅ 원본 데이터 정렬 (O(M log M))
@@ -336,17 +346,52 @@ def rounding(fake, real, batch_size=100000):
 
             print(f"📝 Batch {batch_idx + 1}/{num_batches} processed ({start} ~ {end} indices)")
 
-    # ✅ 범주형(Categorical) 컬럼 찾기
-    categorical_cols = real.select_dtypes(exclude=[np.number]).columns.tolist()
-
-    # ✅ Label Encoding 복원 수행
-    encoders = {col: LabelEncoder().fit(real[col]) for col in categorical_cols}
-
+    # ✅ 범주형 데이터 Label Encoding 적용
+    encoders = {}
     for col in categorical_cols:
+        try:
+            i = real.columns.get_loc(col)  # 컬럼 인덱스 찾기
+            print(f"🔄 Encoding categorical column: {col}")
+
+            # ✅ Label Encoding 수행
+            encoders[col] = LabelEncoder().fit(real[col])
+            fake[:, i] = encoders[col].transform(fake[:, i].astype(str))  # 🚀 Label Encoding 적용
+
+            # ✅ 가장 가까운 값 매칭 (연속형과 동일한 방식 적용)
+            unique_encoded_values = np.sort(encoders[col].transform(real[col].unique()))  # Encoding된 고유값
+            indices = np.searchsorted(unique_encoded_values, fake[:, i], side="left")
+
+            # ✅ 경계값 처리 (인덱스 범위 초과 방지)
+            indices = np.clip(indices, 0, len(unique_encoded_values) - 1)
+
+            # ✅ 가장 가까운 값으로 대체
+            fake[:, i] = unique_encoded_values[indices]
+
+        except ValueError as e:
+            print(f"⚠️ Warning: 범주형 데이터 {col} 복원 불가 → 예외 처리됨")
+            print(e)
+
+    # ✅ Label Encoding 복원
+    for col in categorical_cols:
+        i = real.columns.get_loc(col)
         print(f"🔄 Restoring categorical column: {col}")
-        fake[:, col] = encoders[col].inverse_transform(fake[:, col].astype(int))  # 🚀 int로 변환 후 복원
+
+        try:
+            # 🔥 `LabelEncoder.classes_` 내에서 가장 가까운 값 찾기
+            unique_classes = np.sort(encoders[col].classes_)
+            indices = np.searchsorted(unique_classes, fake[:, i], side="left")
+            indices = np.clip(indices, 0, len(unique_classes) - 1)
+            fake[:, i] = unique_classes[indices]  # 가장 가까운 값으로 대체
+
+            # ✅ `inverse_transform()` 실행 (예외 처리 추가)
+            fake[:, i] = encoders[col].inverse_transform(fake[:, i].astype(int))
+
+        except ValueError as e:
+            print(f"⚠️ Warning: 범주형 데이터 {col} 복원 실패")
+            print(e)
 
     return fake
+
 
 
 
