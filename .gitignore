@@ -6,3 +6,17 @@ requirements.txt
 
 ##.csv파일 모두 지우기
 *.csv
+
+## original tablegan gitignore file
+
+\.idea/
+
+\.ipynb_checkpoints/
+
+tablegan/__pycache__/
+
+tablegan/checkpoint/
+
+tablegan/samples/
+
+tablegan/logs/

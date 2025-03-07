@@ -392,6 +392,9 @@ def rounding(fake, real, batch_size=100000):
 
     return fake
 
+
+
+
 def compare(real, fake, save_dir, col_prefix, CDF=True, Hist=True):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -483,14 +486,24 @@ def generate_data(sess, model, config, option, num_samples=1000000):
             print("❌ Error: 원본 데이터 로드 실패")
             exit(1)
 
-        # ✅ 데이터 스케일링
         min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
         min_max_scaler.fit(origin_data.values)
         scaled_fake = min_max_scaler.inverse_transform(fake_data)
 
-        # ✅ 데이터 반올림 및 저장
         round_scaled_fake = rounding(scaled_fake, origin_data.values)
+        # ✅ `round_scaled_fake`의 컬럼 개수와 `real_columns` 개수 맞추기
+        if round_scaled_fake.shape[1] != len(real_columns):
+            print(f"⚠️ Warning: Column size mismatch! Fake: {round_scaled_fake.shape[1]}, Original: {len(real_columns)}")
+            print("⚠️ Adjusting column count by trimming or padding.")
+
+            # ✅ 컬럼 개수 맞추기 (초과 컬럼 제거)
+            if round_scaled_fake.shape[1] > len(real_columns):
+                round_scaled_fake = round_scaled_fake[:, :len(real_columns)]
+            elif round_scaled_fake.shape[1] < len(real_columns):
+                real_columns = real_columns[:round_scaled_fake.shape[1]]  # 컬럼 개수 줄이기
+        
         output_path = f'{save_dir}/{config.dataset}_{config.test_id}_fake.csv'
+        
         print("fake 파일 만들어지는 중")
         # ✅ `round_scaled_fake`의 컬럼 개수와 `real_columns` 개수 맞추기
         if round_scaled_fake.shape[1] != len(real_columns):
