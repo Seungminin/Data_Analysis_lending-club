@@ -295,8 +295,7 @@ def nearest_value(array, value):
 
 def rounding(fake, real, batch_size=100000):
     """
-    1️⃣ 연속형 데이터 반올림 (배치 적용)
-    2️⃣ 범주형 데이터(Label Encoding 후 가장 가까운 값 매칭 후 복원)
+    모든 feature(연속형 + 범주형)에 대해 rounding을 수행하는 함수.
 
     Parameters:
     - fake (numpy.ndarray): 생성된 가짜 데이터
@@ -304,36 +303,30 @@ def rounding(fake, real, batch_size=100000):
     - batch_size (int): 배치 단위 처리 크기 (기본값: 100,000)
 
     Returns:
-    - fake (numpy.ndarray): 반올림 및 범주형 복원된 가짜 데이터
+    - fake (numpy.ndarray): 모든 feature에 대해 rounding된 데이터
     """
-
-    # ✅ `real`이 numpy.ndarray로 변환된 경우, DataFrame으로 변환
+    # ✅ `real`이 numpy.ndarray인 경우 DataFrame으로 변환
     if isinstance(real, np.ndarray):
         print("⚠️ Warning: real 데이터가 numpy 배열로 변환됨 → DataFrame으로 복원")
         real = pd.DataFrame(real)
 
     num_samples, num_features = fake.shape
 
-    # ✅ 연속형(Continuous) 및 범주형(Categorical) 컬럼 찾기
-    continuous_cols = real.select_dtypes(include=[np.number]).columns.tolist()
-    categorical_cols = real.select_dtypes(exclude=[np.number]).columns.tolist()
-
-    # ✅ 연속형 데이터 반올림 적용 (배치 처리)
-    for col in continuous_cols:
-        i = real.columns.get_loc(col)  # 컬럼 인덱스 찾기
-        print(f"⚡ Fast rounding column: {col} (Batch Processing)")
+    # ✅ 모든 feature에 rounding 적용
+    for col_idx in range(num_features):
+        print(f"⚡ Fast rounding column index: {col_idx} (Batch Processing)")
 
         # ✅ 원본 데이터 정렬 (O(M log M))
-        unique_values = np.sort(real[col].unique())
+        unique_values = np.sort(np.unique(real.iloc[:, col_idx]))
 
-        # ✅ 배치 단위로 연속형 데이터 처리
+        # ✅ 배치 단위로 rounding 적용
         num_batches = math.ceil(num_samples / batch_size)
 
         for batch_idx in range(num_batches):
             start = batch_idx * batch_size
             end = min((batch_idx + 1) * batch_size, num_samples)
 
-            batch = fake[start:end, i]  # 배치 크기만큼 슬라이싱
+            batch = fake[start:end, col_idx]  # 배치 크기만큼 슬라이싱
 
             # ✅ 이진 탐색을 통한 가장 가까운 값 찾기 (O(N log log M))
             indices = np.searchsorted(unique_values, batch, side="left")
@@ -342,57 +335,11 @@ def rounding(fake, real, batch_size=100000):
             indices = np.clip(indices, 0, len(unique_values) - 1)
 
             # ✅ 가장 가까운 값으로 대체
-            fake[start:end, i] = unique_values[indices]
+            fake[start:end, col_idx] = unique_values[indices]
 
-            print(f"📝 Batch {batch_idx + 1}/{num_batches} processed ({start} ~ {end} indices)")
-
-    # ✅ 범주형 데이터 Label Encoding 적용
-    encoders = {}
-    for col in categorical_cols:
-        try:
-            i = real.columns.get_loc(col)  # 컬럼 인덱스 찾기
-            print(f"🔄 Encoding categorical column: {col}")
-
-            # ✅ Label Encoding 수행
-            encoders[col] = LabelEncoder().fit(real[col])
-            fake[:, i] = encoders[col].transform(fake[:, i].astype(str))  # 🚀 Label Encoding 적용
-
-            # ✅ 가장 가까운 값 매칭 (연속형과 동일한 방식 적용)
-            unique_encoded_values = np.sort(encoders[col].transform(real[col].unique()))  # Encoding된 고유값
-            indices = np.searchsorted(unique_encoded_values, fake[:, i], side="left")
-
-            # ✅ 경계값 처리 (인덱스 범위 초과 방지)
-            indices = np.clip(indices, 0, len(unique_encoded_values) - 1)
-
-            # ✅ 가장 가까운 값으로 대체
-            fake[:, i] = unique_encoded_values[indices]
-
-        except ValueError as e:
-            print(f"⚠️ Warning: 범주형 데이터 {col} 복원 불가 → 예외 처리됨")
-            print(e)
-
-    # ✅ Label Encoding 복원
-    for col in categorical_cols:
-        i = real.columns.get_loc(col)
-        print(f"🔄 Restoring categorical column: {col}")
-
-        try:
-            # 🔥 `LabelEncoder.classes_` 내에서 가장 가까운 값 찾기
-            unique_classes = np.sort(encoders[col].classes_)
-            indices = np.searchsorted(unique_classes, fake[:, i], side="left")
-            indices = np.clip(indices, 0, len(unique_classes) - 1)
-            fake[:, i] = unique_classes[indices]  # 가장 가까운 값으로 대체
-
-            # ✅ `inverse_transform()` 실행 (예외 처리 추가)
-            fake[:, i] = encoders[col].inverse_transform(fake[:, i].astype(int))
-
-        except ValueError as e:
-            print(f"⚠️ Warning: 범주형 데이터 {col} 복원 실패")
-            print(e)
+            #print(f"📝 Batch {batch_idx + 1}/{num_batches} processed ({start} ~ {end} indices)")
 
     return fake
-
-
 
 
 def compare(real, fake, save_dir, col_prefix, CDF=True, Hist=True):
@@ -420,7 +367,6 @@ def compare(real, fake, save_dir, col_prefix, CDF=True, Hist=True):
 
 
 def generate_data(sess, model, config, option, num_samples=1000000):
-
     print("🚀 Start Generating Data...")
 
     if option == 1:
@@ -428,10 +374,8 @@ def generate_data(sess, model, config, option, num_samples=1000000):
         input_size = num_samples
         dim = config.output_width
         batch_size = config.batch_size
-
         total_batches = math.ceil(input_size / batch_size)
         actual_samples = total_batches * batch_size
-
         print(f"🔢 요청 샘플 수: {input_size}, 실제 생성 샘플 수 (배치 맞춤): {actual_samples}")
 
         # ✅ 결과 배열 초기화
@@ -442,17 +386,13 @@ def generate_data(sess, model, config, option, num_samples=1000000):
 
         for idx in range(total_batches):
             print(f"📦 Generating batch {idx + 1}/{total_batches}")
-
-            # ⭐ 마지막 배치 샘플 수 조정
             samples_to_generate = batch_size if idx < total_batches - 1 else input_size - (idx * batch_size)
 
             z_sample = np.random.uniform(-1, 1, size=(samples_to_generate, model.z_dim))
             zero_labels = model.zero_one_ratio
-
             y = np.ones((samples_to_generate, 1))
             y[:int(zero_labels * samples_to_generate)] = 0
             np.random.shuffle(y)
-
             y = y.astype('int16')
             y_one_hot = np.zeros((samples_to_generate, model.y_dim))
             y_one_hot[np.arange(samples_to_generate), y.flatten()] = 1
@@ -469,16 +409,15 @@ def generate_data(sess, model, config, option, num_samples=1000000):
 
         # ✅ 최종 데이터 변환 및 샘플 자르기
         fake_data = merged_data[:input_size].reshape(input_size, dim * dim)
-        fake_data = fake_data[:, :model.attrib_num]  # (1000000, 65)
+        fake_data = fake_data[:, :model.attrib_num]
         print(f"✅ Fake Data shape: {fake_data.shape}")
 
-        # ✅ 원본 데이터 로드
-        origin_data_path = model.train_data_path
+        # ✅ 원본 데이터 로드 및 Label Encoding
+        origin_data_path = "C:/Users/GCU/Lending_club/Data_Analysis_lending-club/tablegan/data/defalut_original/defalut_real"
         if os.path.exists(origin_data_path + ".csv"):
             print(f"📥 Loading CSV input file: {origin_data_path}.csv")
-            origin_data = pd.read_csv(origin_data_path + ".csv", sep=',')  # ✅ 수정됨
+            origin_data = pd.read_csv(origin_data_path + ".csv", sep=',')
             real_columns = origin_data.columns.to_list()
-            origin_data = origin_data.apply(pd.to_numeric, errors='coerce').fillna(0)  # 숫자 변환 및 NaN 처리
         elif os.path.exists(origin_data_path + ".pickle"):
             with open(origin_data_path + '.pickle', 'rb') as handle:
                 origin_data = pickle.load(handle)
@@ -486,43 +425,52 @@ def generate_data(sess, model, config, option, num_samples=1000000):
             print("❌ Error: 원본 데이터 로드 실패")
             exit(1)
 
+        # ✅ 범주형 데이터 Label Encoding 적용 (MinMax Scaling을 위해 필요)
+        encoders = {}
+        categorical_cols = origin_data.select_dtypes(exclude=[np.number]).columns.tolist()
+
+        for col in categorical_cols:
+            print(f"🔄 Encoding categorical column: {col}")
+            encoders[col] = LabelEncoder().fit(origin_data[col])
+            origin_data[col] = encoders[col].transform(origin_data[col])
+
+        # ✅ MinMax Scaling
         min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
         min_max_scaler.fit(origin_data.values)
         scaled_fake = min_max_scaler.inverse_transform(fake_data)
 
-        round_scaled_fake = rounding(scaled_fake, origin_data.values)
-        # ✅ `round_scaled_fake`의 컬럼 개수와 `real_columns` 개수 맞추기
+        # ✅ 데이터 반올림
+        round_scaled_fake = rounding(scaled_fake, origin_data)
+
+        for col in categorical_cols:
+            print(f"🔄 Restoring categorical column: {col}")
+
+            try:
+                # DataFrame 변환 후 컬럼 접근
+                round_scaled_fake_df = pd.DataFrame(round_scaled_fake, columns=real_columns)
+
+                # 🚀 `astype(int)` 변환 후 복원
+                round_scaled_fake_df[col] = encoders[col].inverse_transform(round_scaled_fake_df[col].astype(int))
+
+                # ✅ DataFrame → NumPy 변환
+                round_scaled_fake = round_scaled_fake_df.to_numpy()
+
+            except ValueError as e:
+                print(f"⚠️ Warning: 범주형 데이터 {col} 복원 실패 → 원본 값 유지")
+                print(e)
+
+        # ✅ 컬럼 개수 맞추기
         if round_scaled_fake.shape[1] != len(real_columns):
             print(f"⚠️ Warning: Column size mismatch! Fake: {round_scaled_fake.shape[1]}, Original: {len(real_columns)}")
-            print("⚠️ Adjusting column count by trimming or padding.")
-
-            # ✅ 컬럼 개수 맞추기 (초과 컬럼 제거)
             if round_scaled_fake.shape[1] > len(real_columns):
                 round_scaled_fake = round_scaled_fake[:, :len(real_columns)]
             elif round_scaled_fake.shape[1] < len(real_columns):
-                real_columns = real_columns[:round_scaled_fake.shape[1]]  # 컬럼 개수 줄이기
-        
-        output_path = f'{save_dir}/{config.dataset}_{config.test_id}_fake.csv'
+                real_columns = real_columns[:round_scaled_fake.shape[1]]
 
-        print("fake 파일 만들어지는 중")
-        # ✅ `round_scaled_fake`의 컬럼 개수와 `real_columns` 개수 맞추기
-        if round_scaled_fake.shape[1] != len(real_columns):
-            print(f"⚠️ Warning: Column size mismatch! Fake: {round_scaled_fake.shape[1]}, Original: {len(real_columns)}")
-            print("⚠️ Adjusting column count by trimming or padding.")
-
-            # ✅ 컬럼 개수 맞추기 (초과 컬럼 제거)
-            if round_scaled_fake.shape[1] > len(real_columns):
-                round_scaled_fake = round_scaled_fake[:, :len(real_columns)]
-            elif round_scaled_fake.shape[1] < len(real_columns):
-                real_columns = real_columns[:round_scaled_fake.shape[1]]  # 컬럼 개수 줄이기
-            
-        # ✅ `pd.DataFrame` 변환 후 CSV 저장
-        round_scaled_fake_df = pd.DataFrame(round_scaled_fake, columns=real_columns)
-            
         # ✅ CSV 저장
-
+        output_path = f'{save_dir}/{config.dataset}_{config.test_id}_fake.csv'
         print("📥 Saving fake data as CSV...")
-        round_scaled_fake_df.to_csv(output_path, index=False, sep=',')
+        pd.DataFrame(round_scaled_fake, columns=real_columns).to_csv(output_path, index=False, sep=',')
 
         print(f"✅ Generated Data shape: {round_scaled_fake.shape}")
         print(f"💾 파일 저장 완료: {output_path}")
