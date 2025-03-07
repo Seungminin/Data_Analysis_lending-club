@@ -503,7 +503,7 @@ def generate_data(sess, model, config, option, num_samples=1000000):
                 real_columns = real_columns[:round_scaled_fake.shape[1]]  # 컬럼 개수 줄이기
         
         output_path = f'{save_dir}/{config.dataset}_{config.test_id}_fake.csv'
-        
+
         print("fake 파일 만들어지는 중")
         # ✅ `round_scaled_fake`의 컬럼 개수와 `real_columns` 개수 맞추기
         if round_scaled_fake.shape[1] != len(real_columns):
@@ -520,6 +520,7 @@ def generate_data(sess, model, config, option, num_samples=1000000):
         round_scaled_fake_df = pd.DataFrame(round_scaled_fake, columns=real_columns)
             
         # ✅ CSV 저장
+
         print("📥 Saving fake data as CSV...")
         round_scaled_fake_df.to_csv(output_path, index=False, sep=',')
 
