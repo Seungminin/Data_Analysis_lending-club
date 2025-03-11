@@ -20,3 +20,6 @@ tablegan/checkpoint/
 tablegan/samples/
 
 tablegan/logs/
+
+#wandb 내용 생략
+wandb/
