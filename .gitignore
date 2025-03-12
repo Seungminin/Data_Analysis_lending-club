@@ -7,6 +7,9 @@ requirements.txt
 ##.csv파일 모두 지우기
 *.csv
 
+## .pkl파일 모두 지우기
+*.pkl
+
 ## original tablegan gitignore file
 
 \.idea/
@@ -23,3 +26,5 @@ tablegan/logs/
 
 #wandb 내용 생략
 wandb/
+
+
