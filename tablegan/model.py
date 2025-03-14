@@ -874,7 +874,7 @@ class TableGan(object):
             self.dataset_name, self.batch_size,
             self.output_height, self.output_width)
 
-    def save(self, checkpoint_dir, step):
+    """def save(self, checkpoint_dir, step):
         model_name = "tableGAN_model"
         if os.path.exists(f'{checkpoint_dir}/{self.model_dir}'):
             highest_num = 0
@@ -898,9 +898,50 @@ class TableGan(object):
         print(" [Saving checkpoints in " + checkpoint_dir + " ...")
         self.saver.save(self.sess,
                         os.path.join(checkpoint_dir, model_name),
-                        global_step=step)
+                        global_step=step)"""
 
+    def save(self, checkpoint_dir, step):
+        model_name = "tableGAN_model"
+        
+        # Windows와 Linux 경로 문제 방지
+        checkpoint_path = os.path.join(checkpoint_dir, self.model_dir)
+        
+        # 경로가 존재하지 않으면 생성
+        if not os.path.exists(checkpoint_path):
+            os.makedirs(checkpoint_path, exist_ok=True)
+
+        print(f" [Saving checkpoints in {checkpoint_path} ...")
+        
+        self.saver.save(self.sess, os.path.join(checkpoint_path, model_name), global_step=step)
+    
     def load(self, checkpoint_dir):
+        import re
+        print(f" [*] Reading checkpoints from {checkpoint_dir} ...")
+
+        checkpoint_path = os.path.join(checkpoint_dir, self.model_dir)
+        print(f"checkpoint path: {checkpoint_path}")
+
+        if not os.path.exists(checkpoint_path):
+            print(f" [!] Checkpoint directory not found: {checkpoint_path}")
+            return False, 0
+
+        ckpt = tf.train.get_checkpoint_state(checkpoint_path)
+
+        if ckpt and ckpt.model_checkpoint_path:
+            ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+            self.saver.restore(self.sess, os.path.join(checkpoint_path, ckpt_name))
+            
+            counter = int(next(re.finditer("(\d+)(?!.*\d)", ckpt_name)).group(0))
+            print(f" [*] Successfully loaded checkpoint {ckpt_name}")
+
+            return True, counter
+        else:
+            print(" [!] Failed to find a valid checkpoint")
+            return False, 0
+
+
+
+    """def load(self, checkpoint_dir):
         import re
         print(" [*] Reading checkpoints from " + checkpoint_dir + " ...")
 
@@ -940,4 +981,4 @@ class TableGan(object):
             return True, counter
         else:
             print(" [*] Failed to find a checkpoint")
-            return False, 0
+            return False, 0"""
