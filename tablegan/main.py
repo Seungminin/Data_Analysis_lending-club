@@ -162,8 +162,6 @@ def main(_):
             generate_data(sess, tablegan, config = FLAGS, option=1, num_samples=1000000)  # Generate exactly 100K samples
             print('Time Elapsed: ')
 
-
-            
             b = datetime.datetime.now()
             print(b - a)
 
