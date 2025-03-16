@@ -417,6 +417,7 @@ def generate_data(sess, model, config, option, num_samples=1000000):
         if os.path.exists(origin_data_path + ".csv"):
             print(f"📥 Loading CSV input file: {origin_data_path}.csv")
             origin_data = pd.read_csv(origin_data_path + ".csv", sep=',')
+            origin_data = origin_data.drop(columns='loan_status')
             real_columns = origin_data.columns.to_list()
         elif os.path.exists(origin_data_path + ".pickle"):
             with open(origin_data_path + '.pickle', 'rb') as handle:
