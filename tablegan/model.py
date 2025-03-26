@@ -313,17 +313,17 @@ class TableGan(object):
         
         # Discriminator freezing method
         DIS_UPDATE_EVERY = 5   # 5개의 에폭 기준으로
-        DIS_SKIP_COUNT = 3     # 그중 2개 에폭은 D를 학습 안 함
+        DIS_SKIP_COUNT = 2     # 그중 2개 에폭은 D를 학습 안 함
 
         # Early Stopping
         best_g_loss = float('inf')
         patience = 0
-        patience_threshold = 10  # 예: 10번 연속 개선 없으면 early stopping
+        patience_threshold = 30  # 예: 30번 연속 개선 없으면 early stopping
 
         for epoch in xrange(config.epoch):
             g_losses_in_epoch = []
             batch_idxs = min(len(self.data_X), config.train_size) // config.batch_size
-            freeze_d = (epoch % DIS_UPDATE_EVERY) > DIS_SKIP_COUNT  # ✅ Discriminator 주기적 휴식 적용
+            freeze_d = (epoch % DIS_UPDATE_EVERY) > DIS_SKIP_COUNT  # ✅ Discriminator 주기적 휴식 적용 (3,4번 째 휴식)
 
             seed = np.random.randint(100000000)
             np.random.seed(seed)
@@ -408,9 +408,9 @@ class TableGan(object):
                         self.y_normal: batch_labels_normal
                     })
                 else:
-                    errD_fake = 0
+                    errD_fake = 1
                     errD_real = 0
-                    errC = 0
+                    errC = 0.3
 
                 wandb.log({"d_loss": errD_fake + errD_real, "g_loss": errG, "c_loss": errC, "step": counter, "epoch": epoch})
                 counter += 1
