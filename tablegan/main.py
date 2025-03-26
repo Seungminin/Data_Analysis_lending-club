@@ -3,9 +3,11 @@ import datetime
 import tensorflow as tf
 import sys
 import mlflow
-
+import wandb
 from model import TableGan
 from utils import pp, generate_data, show_all_variables
+
+wandb.login()
 
 flags = tf.app.flags
 
@@ -64,7 +66,8 @@ def main(_):
         {'id': 'OI_1001_00', 'alpha': 1.0, 'beta': 0.01, 'delta_v': 0.0, 'delta_m': 0.0},
         {'id': 'OI_1001_11', 'alpha': 1.0, 'beta': 0.01, 'delta_v': 0.1, 'delta_m': 0.1},
         {'id': 'OI_1001_22', 'alpha': 1.0, 'beta': 0.01, 'delta_v': 0.2, 'delta_m': 0.2},
-        {'id': 'custom', 'alpha': 0.3, 'beta': 0.8, 'delta_v': 0.1, 'delta_m': 0.1}
+        {'id': 'custom_restrict', 'alpha': 0.3, 'beta': 0.8, 'delta_v': 0.1, 'delta_m': 0.1},
+        {'id': 'custom', 'alpha': 0.3, 'beta': 0.8, 'delta_v': 0.0, 'delta_m': 0.0}
     ]
 
     found = False

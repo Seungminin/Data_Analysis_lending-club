@@ -26,5 +26,7 @@ tablegan/logs/
 
 #wandb 내용 생략
 wandb/
+tablegan/wandb/
+
 
 
