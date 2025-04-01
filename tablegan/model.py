@@ -260,15 +260,16 @@ class TableGan(object):
             "delta_var": config.delta_v,
         })
 
-        d_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
-            .minimize(self.d_loss, var_list=self.d_vars)
-
+        d_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1).minimize(self.d_loss, var_list=self.d_vars)
         if self.y_dim:
-            c_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
-                .minimize(self.c_loss, var_list=self.c_vars)
+            c_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1).minimize(self.c_loss, var_list=self.c_vars)
 
-        g_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
-            .minimize(self.g_loss, var_list=self.g_vars)
+        # Alpha/Beta placeholders for scheduling
+        self.alpha_ph = tf.placeholder(tf.float32, shape=(), name="alpha_ph")
+        self.beta_ph = tf.placeholder(tf.float32, shape=(), name="beta_ph")
+
+        self.g_loss_scheduled = self.alpha_ph * (0.5 * self.g_loss_c + self.g_loss_o) + self.beta_ph * self.info_loss
+        g_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1).minimize(self.g_loss_scheduled, var_list=self.g_vars)
 
         try:
             tf.global_variables_initializer().run()
@@ -318,7 +319,7 @@ class TableGan(object):
         # Early Stopping
         best_g_loss = float('inf')
         patience = 0
-        patience_threshold = 30  # 예: 30번 연속 개선 없으면 early stopping
+        patience_threshold = 30  # 예: 50번 연속 개선 없으면 early stopping
 
         for epoch in xrange(config.epoch):
             g_losses_in_epoch = []
@@ -334,31 +335,26 @@ class TableGan(object):
                 np.random.seed(seed)
                 np.random.shuffle(self.data_y_normal)
 
-            for idx in xrange(0, batch_idxs - 1):
+            for idx in xrange(batch_idxs - 1):
                 batch = self.data_X[idx * config.batch_size:(idx + 1) * config.batch_size]
-                if self.y_dim:
-                    batch_labels = self.data_y[idx * config.batch_size:(idx + 1) * config.batch_size]
-                    batch_labels_normal = self.data_y_normal[idx * config.batch_size:(idx + 1) * config.batch_size]
-
-                if self.grayscale:
-                    batch_images = np.array(batch).astype(np.float32)[:, :, :, None]
-                else:
-                    batch_images = np.array(batch).astype(np.float32)
-
+                batch_labels = self.data_y[idx * config.batch_size:(idx + 1) * config.batch_size]
+                batch_labels_normal = self.data_y_normal[idx * config.batch_size:(idx + 1) * config.batch_size]
+                batch_images = np.array(batch).astype(np.float32)[:, :, :, None] if self.grayscale else np.array(batch).astype(np.float32)
                 batch_z = np.random.uniform(-1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
 
                 if self.y_dim and not freeze_d:
-                    _, summary_str = self.sess.run([d_optim, self.d_sum],
-                        feed_dict={self.inputs: batch_images, self.z: batch_z, self.y: batch_labels, self.y_normal: batch_labels_normal})
-                    self.writer.add_summary(summary_str, counter)
+                    self.sess.run([d_optim], feed_dict={self.inputs: batch_images, self.z: batch_z, self.y: batch_labels, self.y_normal: batch_labels_normal})
+                    self.sess.run([c_optim], feed_dict={self.inputs: batch_images, self.z: batch_z, self.y: batch_labels, self.y_normal: batch_labels_normal})
 
-                    _, summary_str = self.sess.run([c_optim, self.c_sum],
-                        feed_dict={self.inputs: batch_images, self.z: batch_z, self.y: batch_labels, self.y_normal: batch_labels_normal})
-                    self.writer.add_summary(summary_str, counter)
+                if freeze_d:
+                    alpha, beta = config.alpha * 1.5, 0.1  # C와 D 정보손실 영향 줄이기
+                else:
+                    alpha, beta = config.alpha, config.beta
 
-                _, summary_str, gmean, gmean_, gvar, gvar_ = self.sess.run(
-                    [g_optim, self.g_sum, self.gmean, self.gmean_, self.gvar, self.gvar_],
-                    feed_dict={
+                for _ in range(2):  # Generator 두 번 업데이트
+                    _, gmean, gmean_, gvar, gvar_ = self.sess.run([
+                        g_optim, self.gmean, self.gmean_, self.gvar, self.gvar_
+                    ], feed_dict={
                         self.z: batch_z,
                         self.y: batch_labels,
                         self.inputs: batch_images,
@@ -366,53 +362,42 @@ class TableGan(object):
                         self.prev_gmean: gmean,
                         self.prev_gmean_: gmean_,
                         self.prev_gvar: gvar,
-                        self.prev_gvar_: gvar_
+                        self.prev_gvar_: gvar_,
+                        self.alpha_ph: alpha,
+                        self.beta_ph: beta
                     })
-                self.writer.add_summary(summary_str, counter)
 
-                # 두 번째 Generator update
-                _, summary_str, gmean, gmean_, gvar, gvar_ = self.sess.run(
-                    [g_optim, self.g_sum, self.gmean, self.gmean_, self.gvar, self.gvar_],
-                    feed_dict={
-                        self.z: batch_z,
-                        self.y: batch_labels,
-                        self.inputs: batch_images,
-                        self.y_normal: batch_labels_normal,
-                        self.prev_gmean: gmean,
-                        self.prev_gmean_: gmean_,
-                        self.prev_gvar: gvar,
-                        self.prev_gvar_: gvar_
-                    })
-                self.writer.add_summary(summary_str, counter)
-
-                errG = self.g_loss.eval({
+                errG = self.sess.run(self.g_loss_scheduled, feed_dict={
                     self.z: batch_z,
                     self.y: batch_labels,
-                    self.y_normal: batch_labels_normal,
                     self.inputs: batch_images,
+                    self.y_normal: batch_labels_normal,
                     self.prev_gmean: gmean,
                     self.prev_gmean_: gmean_,
                     self.prev_gvar: gvar,
-                    self.prev_gvar_: gvar_
+                    self.prev_gvar_: gvar_,
+                    self.alpha_ph: alpha,
+                    self.beta_ph: beta
                 })
-                self.writer.add_summary(summary_str, counter)
-                g_losses_in_epoch.append(errG)
 
+                g_losses_in_epoch.append(errG)
+                errD_fake = errD_real = errC = 0
                 if not freeze_d:
-                    errD_fake = self.d_loss_fake.eval({self.z: batch_z, self.y: batch_labels})
-                    errD_real = self.d_loss_real.eval({self.inputs: batch_images, self.y: batch_labels})
-                    errC = self.c_loss.eval({
+                    errD_fake = self.sess.run(self.d_loss_fake, {self.z: batch_z, self.y: batch_labels})
+                    errD_real = self.sess.run(self.d_loss_real, {self.inputs: batch_images, self.y: batch_labels})
+                    errC = self.sess.run(self.c_loss, {
                         self.inputs: batch_images,
                         self.z: batch_z,
                         self.y: batch_labels,
                         self.y_normal: batch_labels_normal
                     })
                 else:
-                    errD_fake = 1
-                    errD_real = 0
-                    errC = 0.3
+                    errD_fake = errD_real = errC = None
 
                 wandb.log({"d_loss": errD_fake + errD_real, "g_loss": errG, "c_loss": errC, "step": counter, "epoch": epoch})
+                experiment.log_metric("d_loss", errD_fake + errD_real, step=idx)
+                experiment.log_metric("g_loss", errG, step=idx)
+                experiment.log_metric("c_loss", errC, step=idx)
                 counter += 1
                 experiment.log_metric("d_loss", errD_fake + errD_real, step=idx)
                 experiment.log_metric("g_loss", errG, step=idx)
