@@ -413,7 +413,7 @@ def generate_data(sess, model, config, option, num_samples=1000000):
         print(f"✅ Fake Data shape: {fake_data.shape}")
 
         # ✅ 원본 데이터 로드 및 Label Encoding
-        origin_data_path = "C:/Users/GCU/Lending_club/Data_Analysis_lending-club/tablegan/data/train/train_original"
+        origin_data_path = "C:/Users/GCU/Lending_club/Data_Analysis_lending-club/tablegan/data/train_fico/train_fico_original"
         if os.path.exists(origin_data_path + ".csv"):
             print(f"📥 Loading CSV input file: {origin_data_path}.csv")
             origin_data = pd.read_csv(origin_data_path + ".csv", sep=',')
@@ -426,6 +426,14 @@ def generate_data(sess, model, config, option, num_samples=1000000):
             print("❌ Error: 원본 데이터 로드 실패")
             exit(1)
 
+        # ✅ 범주형 데이터 Label Encoding 적용 (MinMax Scaling을 위해 필요)
+        encoders = {}
+        categorical_cols = origin_data.select_dtypes(exclude=[np.number]).columns.tolist()
+
+        for col in categorical_cols:
+            print(f"🔄 Encoding categorical column: {col}")
+            encoders[col] = LabelEncoder().fit(origin_data[col])
+            origin_data[col] = encoders[col].transform(origin_data[col])
 
         # ✅ MinMax Scaling
         min_max_scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
@@ -435,20 +443,30 @@ def generate_data(sess, model, config, option, num_samples=1000000):
         # ✅ 데이터 반올림
         round_scaled_fake = rounding(scaled_fake, origin_data)
 
+        for col in categorical_cols:
+            print(f"🔄 Restoring categorical column: {col}")
+
+            try:
+                # DataFrame 변환 후 컬럼 접근
+                round_scaled_fake_df = pd.DataFrame(round_scaled_fake, columns=real_columns)
+
+                # 🚀 `astype(int)` 변환 후 복원
+                round_scaled_fake_df[col] = encoders[col].inverse_transform(round_scaled_fake_df[col].astype(int))
+
+                # ✅ DataFrame → NumPy 변환
+                round_scaled_fake = round_scaled_fake_df.to_numpy()
+
+            except ValueError as e:
+                print(f"⚠️ Warning: 범주형 데이터 {col} 복원 실패 → 원본 값 유지")
+                print(e)
+
+        # ✅ 컬럼 개수 맞추기
         if round_scaled_fake.shape[1] != len(real_columns):
             print(f"⚠️ Warning: Column size mismatch! Fake: {round_scaled_fake.shape[1]}, Original: {len(real_columns)}")
             if round_scaled_fake.shape[1] > len(real_columns):
                 round_scaled_fake = round_scaled_fake[:, :len(real_columns)]
             elif round_scaled_fake.shape[1] < len(real_columns):
                 real_columns = real_columns[:round_scaled_fake.shape[1]]
-
-        output_path = f'{save_dir}/{config.dataset}_{config.test_id}_fake.csv'
-        print("📥 Saving fake data as CSV...")
-        pd.DataFrame(round_scaled_fake, columns=real_columns).to_csv(output_path, index=False, sep=',')
-
-        print(f"✅ Generated Data shape: {round_scaled_fake.shape}")
-        print(f"💾 파일 저장 완료: {output_path}")
-
 
         # ✅ CSV 저장
         output_path = f'{save_dir}/{config.dataset}_{config.test_id}_fake.csv'
