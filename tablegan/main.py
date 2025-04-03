@@ -7,7 +7,7 @@ import wandb
 from model import TableGan
 from utils import pp, generate_data, show_all_variables
 
-wandb.login()
+#wandb.login()
 
 flags = tf.app.flags
 
