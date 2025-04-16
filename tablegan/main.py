@@ -67,7 +67,8 @@ def main(_):
         {'id': 'OI_1001_11', 'alpha': 1.0, 'beta': 0.01, 'delta_v': 0.1, 'delta_m': 0.1},
         {'id': 'OI_1001_22', 'alpha': 1.0, 'beta': 0.01, 'delta_v': 0.2, 'delta_m': 0.2},
         {'id': 'custom_restrict', 'alpha': 0.3, 'beta': 0.8, 'delta_v': 0.1, 'delta_m': 0.1},
-        {'id': 'custom', 'alpha': 0.3, 'beta': 0.8, 'delta_v': 0.0, 'delta_m': 0.0}
+        {'id': 'custom', 'alpha': 0.3, 'beta': 0.8, 'delta_v': 0.0, 'delta_m': 0.0},
+        {'id': 'custom_info', 'alpha': 1.0, 'beta': 1.2, 'delta_v': 0.1, 'delta_m': 0.1}
     ]
 
     found = False
@@ -163,7 +164,7 @@ def main(_):
                 OPTION = 1
             
             #generate_data(sess, tablegan, FLAGS, OPTION)
-            generate_data(sess, tablegan, config = FLAGS, option=1, num_samples=100000)  # Generate exactly 100K samples
+            generate_data(sess, tablegan, config = FLAGS, option=1, num_samples=500000)  # Generate exactly 100K samples
             print('Time Elapsed: ')
 
             b = datetime.datetime.now()
