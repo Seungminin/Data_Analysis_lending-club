@@ -3,19 +3,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import os
-import pickle
+import numpy as np
 from ops import reparameterize, init_weights
 
 class Encoder(nn.Module):
     def __init__(self, input_dim, latent_dim):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, 128)
-        self.fc_mu = nn.Linear(128, latent_dim)
-        self.fc_logvar = nn.Linear(128, latent_dim)
+        self.fc1 = nn.Linear(input_dim, 256)
+        self.bn1 = nn.BatchNorm1d(256)
+        self.fc_mu = nn.Linear(256, latent_dim)
+        self.fc_logvar = nn.Linear(256, latent_dim)
         self.apply(init_weights)
 
     def forward(self, x):
-        h = F.relu(self.fc1(x))
+        h = F.relu(self.bn1(self.fc1(x)))
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
         z = reparameterize(mu, logvar)
@@ -25,9 +26,14 @@ class Generator(nn.Module):
     def __init__(self, latent_dim, output_dim):
         super().__init__()
         self.model = nn.Sequential(
-            nn.Linear(latent_dim, 128),
+            nn.Linear(latent_dim, 256),
+            nn.BatchNorm1d(256),
             nn.ReLU(),
-            nn.Linear(128, output_dim)
+            nn.Linear(256, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Linear(512, output_dim),
+            nn.Tanh()
         )
         self.apply(init_weights)
 
@@ -38,10 +44,25 @@ class Discriminator(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
         self.model = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 512),
             nn.LeakyReLU(0.2),
-            nn.Linear(128, 1),
+            nn.Linear(512, 256),
+            nn.LeakyReLU(0.2),
+            nn.Linear(256, 1),
             nn.Sigmoid()
+        )
+        self.apply(init_weights)
+
+    def forward(self, x):
+        return self.model(x)
+
+class Classifier(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 2)
         )
         self.apply(init_weights)
 
@@ -69,17 +90,23 @@ class VAETableGan(nn.Module):
         self.encoder = Encoder(input_dim, self.latent_dim).to(device)
         self.generator = Generator(self.latent_dim, input_dim).to(device)
         self.discriminator = Discriminator(input_dim).to(device)
+        self.classifier = Classifier(input_dim).to(device)
 
         self.opt_enc = torch.optim.Adam(self.encoder.parameters(), lr=0.0002)
         self.opt_gen = torch.optim.Adam(self.generator.parameters(), lr=0.0002)
         self.opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=0.0002)
+        self.opt_cls = torch.optim.Adam(self.classifier.parameters(), lr=0.0002)
+
+        self.prev_gmean = None
+        self.prev_gvar = None
 
     def forward(self, x):
         z, mu, logvar = self.encoder(x)
         x_hat = self.generator(z)
         return x_hat, mu, logvar
 
-    def compute_losses(self, real_data):
+    def compute_losses(self, real_data, labels):
+        batch_size = real_data.size(0)
         z, mu, logvar = self.encoder(real_data)
         fake_data = self.generator(z)
 
@@ -88,17 +115,43 @@ class VAETableGan(nn.Module):
 
         recon_loss = F.mse_loss(fake_data, real_data)
         kl_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+
         adv_loss = F.binary_cross_entropy(fake_score, torch.ones_like(fake_score))
         disc_loss = F.binary_cross_entropy(real_score, torch.ones_like(real_score)) + \
                     F.binary_cross_entropy(fake_score, torch.zeros_like(fake_score))
 
-        gen_loss = self.alpha * adv_loss + self.beta * (recon_loss + kl_loss)
-        return gen_loss, disc_loss, recon_loss.item(), kl_loss.item(), adv_loss.item()
+        # classifier
+        real_logits = self.classifier(real_data)
+        fake_logits = self.classifier(fake_data)
+        class_loss = F.cross_entropy(real_logits, labels) + F.cross_entropy(fake_logits, labels)
 
-    def train(self, epochs, lr, experiment):
-        for epoch in range(epochs):
-            # 이 부분은 데이터 로딩 로직에 따라 수정되어야 함
-            raise NotImplementedError("Add your DataLoader loop here.")
+        # info loss
+        D_features = real_score
+        D_features_ = fake_score
+
+        mean_real = torch.mean(D_features, dim=0, keepdim=True)
+        mean_fake = torch.mean(D_features_, dim=0, keepdim=True)
+        var_real = torch.var(D_features, dim=0, keepdim=True)
+        var_fake = torch.var(D_features_, dim=0, keepdim=True)
+
+        if self.prev_gmean is None:
+            self.prev_gmean = mean_real.detach()
+            self.prev_gvar = var_real.detach()
+
+        gmean = 0.99 * self.prev_gmean + 0.01 * mean_real
+        gmean_ = 0.99 * self.prev_gmean + 0.01 * mean_fake
+        gvar = 0.99 * self.prev_gvar + 0.01 * var_real
+        gvar_ = 0.99 * self.prev_gvar + 0.01 * var_fake
+
+        info_loss = torch.sum(torch.clamp(torch.abs(gmean - gmean_) - self.delta_mean, min=0.0)) + \
+                     torch.sum(torch.clamp(torch.abs(gvar - gvar_) - self.delta_var, min=0.0))
+
+        self.prev_gmean = gmean.detach()
+        self.prev_gvar = gvar.detach()
+
+        g_loss = self.alpha * (adv_loss + class_loss) + self.beta * (recon_loss + kl_loss + info_loss)
+
+        return g_loss, disc_loss, class_loss.item(), recon_loss.item(), kl_loss.item(), adv_loss.item(), info_loss.item()
 
     def save(self):
         os.makedirs(self.checkpoint_dir, exist_ok=True)
