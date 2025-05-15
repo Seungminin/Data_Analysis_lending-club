@@ -11,7 +11,7 @@ from utils import pp, generate_data, show_all_parameters
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--epoch', type=int, default=10)
-    parser.add_argument('--learning_rate', type=float, default=0.0002)
+    parser.add_argument('--lr', type=float, default=0.0002)
     parser.add_argument('--batch_size', type=int, default=512)
     parser.add_argument('--input_dim', type=int, default=16)
     parser.add_argument('--dataset', type=str, default='loan')
