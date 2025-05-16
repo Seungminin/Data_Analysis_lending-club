@@ -10,9 +10,9 @@ from utils import pp, generate_data, show_all_parameters
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--epoch', type=int, default=10)
-    parser.add_argument('--lr', type=float, default=0.0002)
+    parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--batch_size', type=int, default=512)
-    parser.add_argument('--input_dim', type=int, default=16)
+    parser.add_argument('--input_dim', type=int, default=108)  # will be treated as image width/height
     parser.add_argument('--dataset', type=str, default='loan_1')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoint')
     parser.add_argument('--sample_dir', type=str, default='samples')
@@ -42,43 +42,27 @@ def main():
 
     pp(vars(args))
 
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = VAETableGan(
+        input_dim=args.input_dim,
+        batch_size=args.batch_size,
+        y_dim=2,
+        alpha=args.alpha,
+        beta=args.beta,
+        delta_mean=args.delta_m,
+        delta_var=args.delta_v,
+        attrib_num=args.attrib_num,
+        label_col=args.label_col,
+        checkpoint_dir=args.checkpoint_dir,
+        sample_dir=args.sample_dir,
+        dataset_name=args.dataset,
+        test_id=args.test_id,
+        device=device
+    )
+
     if args.train:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        model = VAETableGan(
-            input_dim=args.input_dim,
-            batch_size=args.batch_size,
-            y_dim=2,
-            alpha=args.alpha,
-            beta=args.beta,
-            delta_mean=args.delta_m,
-            delta_var=args.delta_v,
-            attrib_num=args.attrib_num,
-            label_col=args.label_col,
-            checkpoint_dir=args.checkpoint_dir,
-            sample_dir=args.sample_dir,
-            dataset_name=args.dataset,
-            test_id=args.test_id,
-            device=device
-        )
         model.train_model(args)
     else:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        model = VAETableGan(
-            input_dim=args.input_dim,
-            batch_size=args.batch_size,
-            y_dim=2,
-            alpha=args.alpha,
-            beta=args.beta,
-            delta_mean=args.delta_m,
-            delta_var=args.delta_v,
-            attrib_num=args.attrib_num,
-            label_col=args.label_col,
-            checkpoint_dir=args.checkpoint_dir,
-            sample_dir=args.sample_dir,
-            dataset_name=args.dataset,
-            test_id=args.test_id,
-            device=device
-        )
         model.load()
         generate_data(model, args.sample_dir, num_samples=100)
 

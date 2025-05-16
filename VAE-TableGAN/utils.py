@@ -28,9 +28,14 @@ def generate_data(model, save_dir, num_samples=10000):
     with torch.no_grad():
         fake = model.generator(z).cpu().numpy()
 
+    # 🔹 3. Postprocess: reshape and inverse scale
+    fake = fake.squeeze()  # shape: (N, H, W)
+    if len(fake.shape) == 3:
+        fake = fake.reshape(fake.shape[0], -1)  # (N, H×W)
+
     scaler = MinMaxScaler(feature_range=(-1, 1))
     scaler.fit(original)
-    fake_inverse = scaler.inverse_transform(fake)
+    fake_inverse = scaler.inverse_transform(fake[:, :original.shape[1]])
 
     for i, col in enumerate(feature_names):
         real_unique = np.sort(original[col].unique())
@@ -55,6 +60,7 @@ def padding_duplicating(data, row_size):
     return arr_data
 
 def reshape(data, dim=None):
-    return data.values.reshape(data.shape[0], -1)
-
-
+    if dim:
+        return data.values.reshape(data.shape[0], dim, dim)
+    else:
+        return data.values.reshape(data.shape[0], -1)

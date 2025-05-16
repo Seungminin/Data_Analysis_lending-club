@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/3db1fe0ae5c74dbf8220975e9c5fbc3c/artifacts
+end_time: 1747358419730
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: 3db1fe0ae5c74dbf8220975e9c5fbc3c
+run_name: learned-goat-839
+run_uuid: 3db1fe0ae5c74dbf8220975e9c5fbc3c
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747358419063
+status: 3
+tags: []
+user_id: chochoa

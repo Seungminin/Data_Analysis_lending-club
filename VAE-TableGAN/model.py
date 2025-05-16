@@ -28,51 +28,75 @@ class Encoder(nn.Module):
         return z, mu, logvar
 
 class Generator(nn.Module):
-    def __init__(self, latent_dim, output_dim):
-        super().__init__()
-        self.model = nn.Sequential(
-            nn.Linear(latent_dim, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Linear(256, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Linear(512, output_dim),
+    def __init__(self, z_dim, feature_maps=64, output_channels=1):
+        super(Generator, self).__init__()
+        self.main = nn.Sequential(
+            nn.ConvTranspose2d(z_dim, feature_maps * 4, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(feature_maps * 4),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(feature_maps * 4, feature_maps * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(feature_maps * 2),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(feature_maps * 2, feature_maps, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(feature_maps),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(feature_maps, output_channels, 3, 1, 1, bias=False),
             nn.Tanh()
         )
-        self.apply(init_weights)
 
     def forward(self, z):
-        return self.model(z)
+        z = z.view(z.size(0), z.size(1), 1, 1)
+        return self.main(z)
 
 class Discriminator(nn.Module):
-    def __init__(self, input_dim):
-        super().__init__()
-        self.model = nn.Sequential(
-            nn.Linear(input_dim, 512),
-            nn.LeakyReLU(0.2),
-            nn.Linear(512, 256),
-            nn.LeakyReLU(0.2),
-            nn.Linear(256, 1),
+    def __init__(self, input_channels=1, feature_maps=64):
+        super(Discriminator, self).__init__()
+        self.main = nn.Sequential(
+            nn.Conv2d(input_channels, feature_maps, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(feature_maps, feature_maps * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(feature_maps * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(feature_maps * 2, feature_maps * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(feature_maps * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(feature_maps * 4, 1, 4, 1, 0, bias=False),
             nn.Sigmoid()
         )
-        self.apply(init_weights)
 
     def forward(self, x):
-        return self.model(x)
+        return self.main(x)
 
 class Classifier(nn.Module):
-    def __init__(self, input_dim):
-        super().__init__()
-        self.model = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, 2)
+    def __init__(self, input_channels=1, feature_maps=64, num_classes=2):
+        super(Classifier, self).__init__()
+        self.main = nn.Sequential(
+            nn.Conv2d(input_channels, feature_maps, 4, 2, 1),
+            nn.BatchNorm2d(feature_maps),
+            nn.ReLU(True),
+
+            nn.Conv2d(feature_maps, feature_maps * 2, 4, 2, 1),
+            nn.BatchNorm2d(feature_maps * 2),
+            nn.ReLU(True),
+
+            nn.Conv2d(feature_maps * 2, feature_maps * 4, 4, 2, 1),
+            nn.BatchNorm2d(feature_maps * 4),
+            nn.ReLU(True),
+
+            nn.AdaptiveAvgPool2d((1, 1))
         )
-        self.apply(init_weights)
+        self.classifier = nn.Linear(feature_maps * 4, num_classes)
 
     def forward(self, x):
-        return self.model(x)
+        x = self.main(x)
+        x = x.view(x.size(0), -1)
+        return self.classifier(x)
 
 class VAETableGan(nn.Module):
     def __init__(self, input_dim, batch_size, y_dim, alpha, beta, delta_mean, delta_var,
@@ -93,15 +117,15 @@ class VAETableGan(nn.Module):
         self.device = device
         self.input_dim = input_dim
 
-        self.encoder = Encoder(input_dim, self.latent_dim).to(device)
-        self.generator = Generator(self.latent_dim, input_dim).to(device)
-        self.discriminator = Discriminator(input_dim).to(device)
-        self.classifier = Classifier(input_dim).to(device)
+        self.encoder = Encoder(input_dim * input_dim, self.latent_dim).to(device)
+        self.generator = Generator(self.latent_dim, output_channels=1).to(device)
+        self.discriminator = Discriminator(input_channels=1).to(device)
+        self.classifier = Classifier(input_channels=1).to(device)
 
-        self.opt_enc = torch.optim.Adam(self.encoder.parameters(), lr=0.0002)
-        self.opt_gen = torch.optim.Adam(self.generator.parameters(), lr=0.0002)
-        self.opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=0.0002)
-        self.opt_cls = torch.optim.Adam(self.classifier.parameters(), lr=0.0002)
+        self.opt_enc = torch.optim.Adam(self.encoder.parameters(), lr=0.001)
+        self.opt_gen = torch.optim.Adam(self.generator.parameters(), lr=0.001)
+        self.opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=0.001)
+        self.opt_cls = torch.optim.Adam(self.classifier.parameters(), lr=0.001)
 
         self.prev_gmean = None
         self.prev_gvar = None
@@ -112,7 +136,8 @@ class VAETableGan(nn.Module):
         return x_hat, mu, logvar
 
     def compute_losses(self, real_data, labels):
-        z, mu, logvar = self.encoder(real_data)
+        real_data_flat = real_data.view(real_data.size(0), -1)
+        z, mu, logvar = self.encoder(real_data_flat)
         fake_data = self.generator(z)
 
         real_score = self.discriminator(real_data)
@@ -153,23 +178,23 @@ class VAETableGan(nn.Module):
 
         return g_loss, disc_loss, class_loss.item(), recon_loss.item(), kl_loss.item(), adv_loss.item(), info_loss.item()
 
-    # model.py 내부 load_dataset 함수
     def load_dataset(self):
         data_path = f"dataset/{self.dataset_name}/{self.dataset_name}.csv"
         X = pd.read_csv(data_path)
         y = X['loan_status']
-        X = X.drop(columns=['loan_status']) 
+        X = X.drop(columns=['loan_status'])
 
         scaler = MinMaxScaler(feature_range=(-1, 1))
         X_scaled = pd.DataFrame(scaler.fit_transform(X))
 
-        reshaped = reshape(X_scaled)
+        dim = self.input_dim
+        padded = padding_duplicating(X_scaled, dim * dim)
+        reshaped = reshape(pd.DataFrame(padded), dim)
 
-        X_tensor = torch.tensor(reshaped, dtype=torch.float32)
+        X_tensor = torch.tensor(reshaped, dtype=torch.float32).unsqueeze(1)
         y_tensor = torch.tensor(y.values, dtype=torch.long)
 
         return TensorDataset(X_tensor, y_tensor)
-
 
     def model_dir(self):
         return f"{self.dataset_name}_{self.batch_size}_{self.input_dim}_{self.test_id}"
