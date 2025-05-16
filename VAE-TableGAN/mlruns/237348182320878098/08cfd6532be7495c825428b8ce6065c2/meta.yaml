@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/08cfd6532be7495c825428b8ce6065c2/artifacts
+end_time: 1747290886562
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: 08cfd6532be7495c825428b8ce6065c2
+run_name: brawny-crab-52
+run_uuid: 08cfd6532be7495c825428b8ce6065c2
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747290886181
+status: 3
+tags: []
+user_id: chochoa

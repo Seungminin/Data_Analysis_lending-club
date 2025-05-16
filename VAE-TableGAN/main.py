@@ -1,4 +1,3 @@
-# main.py
 import os
 import datetime
 import torch
@@ -14,7 +13,7 @@ def parse_args():
     parser.add_argument('--lr', type=float, default=0.0002)
     parser.add_argument('--batch_size', type=int, default=512)
     parser.add_argument('--input_dim', type=int, default=16)
-    parser.add_argument('--dataset', type=str, default='loan')
+    parser.add_argument('--dataset', type=str, default='loan_1')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoint')
     parser.add_argument('--sample_dir', type=str, default='samples')
     parser.add_argument('--train', action='store_true')
@@ -36,44 +35,52 @@ def main():
         raise ValueError("Invalid test_id provided")
 
     cfg = test_configs[args.test_id]
-    alpha, beta = cfg['alpha'], cfg['beta']
-    delta_m, delta_v = cfg['delta_m'], cfg['delta_v']
+    args.alpha = cfg['alpha']
+    args.beta = cfg['beta']
+    args.delta_m = cfg['delta_m']
+    args.delta_v = cfg['delta_v']
 
     pp(vars(args))
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    model = VAETableGan(
-        input_dim=args.input_dim,
-        batch_size=args.batch_size,
-        y_dim=2,
-        alpha=alpha,
-        beta=beta,
-        delta_mean=delta_m,
-        delta_var=delta_v,
-        attrib_num=args.attrib_num,
-        label_col=args.label_col,
-        checkpoint_dir=args.checkpoint_dir,
-        sample_dir=args.sample_dir,
-        dataset_name=args.dataset,
-        test_id=args.test_id,
-        device=device
-    )
-
-    show_all_parameters(model)
-
-    mlflow.set_experiment("VAE-TableGAN")
-    mlflow.start_run()
-
-    mlflow.log_param("epoch", args.epoch)
-    mlflow.log_param("alpha", alpha)
-    mlflow.log_param("beta", beta)
-
     if args.train:
-        model.train(args.epoch, args.learning_rate, mlflow)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model = VAETableGan(
+            input_dim=args.input_dim,
+            batch_size=args.batch_size,
+            y_dim=2,
+            alpha=args.alpha,
+            beta=args.beta,
+            delta_mean=args.delta_m,
+            delta_var=args.delta_v,
+            attrib_num=args.attrib_num,
+            label_col=args.label_col,
+            checkpoint_dir=args.checkpoint_dir,
+            sample_dir=args.sample_dir,
+            dataset_name=args.dataset,
+            test_id=args.test_id,
+            device=device
+        )
+        model.train_model(args)
     else:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model = VAETableGan(
+            input_dim=args.input_dim,
+            batch_size=args.batch_size,
+            y_dim=2,
+            alpha=args.alpha,
+            beta=args.beta,
+            delta_mean=args.delta_m,
+            delta_var=args.delta_v,
+            attrib_num=args.attrib_num,
+            label_col=args.label_col,
+            checkpoint_dir=args.checkpoint_dir,
+            sample_dir=args.sample_dir,
+            dataset_name=args.dataset,
+            test_id=args.test_id,
+            device=device
+        )
         model.load()
-        generate_data(model, args.sample_dir, num_samples=100000)
+        generate_data(model, args.sample_dir, num_samples=100)
 
 if __name__ == '__main__':
     main()

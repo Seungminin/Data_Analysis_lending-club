@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/e7dbc193965544aa8d8d0e975d280b2e/artifacts
+end_time: 1747295853894
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: e7dbc193965544aa8d8d0e975d280b2e
+run_name: stylish-panda-366
+run_uuid: e7dbc193965544aa8d8d0e975d280b2e
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747295800028
+status: 3
+tags: []
+user_id: chochoa

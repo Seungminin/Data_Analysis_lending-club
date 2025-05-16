@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/364fd28d6dc04d4785cddf6af570ebec/artifacts
+end_time: 1747290848389
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: 364fd28d6dc04d4785cddf6af570ebec
+run_name: handsome-snipe-229
+run_uuid: 364fd28d6dc04d4785cddf6af570ebec
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747290848015
+status: 3
+tags: []
+user_id: chochoa
