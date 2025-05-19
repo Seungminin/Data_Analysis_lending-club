@@ -1,23 +1,27 @@
 import os
+
+import wandb
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pandas as pd
 import numpy as np
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import MinMaxScaler
+from tqdm import tqdm
 
 from ops import reparameterize, init_weights
-from utils import padding_duplicating, reshape
+from utils import TabularDataset, compute_mmd, compute_wasserstein
 import mlflow
 
 class Encoder(nn.Module):
     def __init__(self, input_dim, latent_dim):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, 256)
-        self.bn1 = nn.BatchNorm1d(256)
-        self.fc_mu = nn.Linear(256, latent_dim)
-        self.fc_logvar = nn.Linear(256, latent_dim)
+        self.fc1 = nn.Linear(input_dim, 1024)
+        self.bn1 = nn.BatchNorm1d(1024)
+        self.fc_mu = nn.Linear(1024, latent_dim)
+        self.fc_logvar = nn.Linear(1024, latent_dim)
         self.apply(init_weights)
 
     def forward(self, x):
@@ -28,54 +32,64 @@ class Encoder(nn.Module):
         return z, mu, logvar
 
 class Generator(nn.Module):
-    def __init__(self, z_dim, feature_maps=64, output_channels=1):
-        super(Generator, self).__init__()
-        self.main = nn.Sequential(
-            nn.ConvTranspose2d(z_dim, feature_maps * 4, 4, 1, 0, bias=False),
+    def __init__(self, z_dim=32, feature_maps=64, output_channels=1):
+        super().__init__()
+        self.fc = nn.Linear(z_dim, feature_maps * 8 * 4 * 4)
+
+        self.deconv = nn.Sequential(
+            nn.BatchNorm2d(feature_maps * 8),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(feature_maps * 8, feature_maps * 4, 4, 2, 1),  # 4→8
             nn.BatchNorm2d(feature_maps * 4),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(feature_maps * 4, feature_maps * 2, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(feature_maps * 4, feature_maps * 2, 4, 2, 1),  # 8→16
             nn.BatchNorm2d(feature_maps * 2),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(feature_maps * 2, feature_maps, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(feature_maps * 2, feature_maps, 4, 2, 1),      # 16→32
             nn.BatchNorm2d(feature_maps),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(feature_maps, output_channels, 3, 1, 1, bias=False),
+            nn.ConvTranspose2d(feature_maps, output_channels, 4, 2, 1),       # 32→64 ✅
             nn.Tanh()
         )
 
     def forward(self, z):
-        z = z.view(z.size(0), z.size(1), 1, 1)
-        return self.main(z)
+        x = self.fc(z).view(z.size(0), -1, 4, 4)
+        return self.deconv(x)
 
 class Discriminator(nn.Module):
     def __init__(self, input_channels=1, feature_maps=64):
-        super(Discriminator, self).__init__()
+        super().__init__()
         self.main = nn.Sequential(
-            nn.Conv2d(input_channels, feature_maps, 4, 2, 1, bias=False),
+            nn.Conv2d(input_channels, feature_maps, 4, 2, 1),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(feature_maps, feature_maps * 2, 4, 2, 1, bias=False),
+            nn.Conv2d(feature_maps, feature_maps * 2, 4, 2, 1),
             nn.BatchNorm2d(feature_maps * 2),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(feature_maps * 2, feature_maps * 4, 4, 2, 1, bias=False),
+            nn.Conv2d(feature_maps * 2, feature_maps * 4, 4, 2, 1),
             nn.BatchNorm2d(feature_maps * 4),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(feature_maps * 4, 1, 4, 1, 0, bias=False),
+            nn.AdaptiveAvgPool2d((1, 1))
+        )
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(feature_maps * 4, 1),
             nn.Sigmoid()
         )
 
     def forward(self, x):
-        return self.main(x)
+        x = self.main(x)
+        return self.classifier(x)
 
 class Classifier(nn.Module):
     def __init__(self, input_channels=1, feature_maps=64, num_classes=2):
-        super(Classifier, self).__init__()
+        super().__init__()
         self.main = nn.Sequential(
             nn.Conv2d(input_channels, feature_maps, 4, 2, 1),
             nn.BatchNorm2d(feature_maps),
@@ -100,7 +114,7 @@ class Classifier(nn.Module):
 
 class VAETableGan(nn.Module):
     def __init__(self, input_dim, batch_size, y_dim, alpha, beta, delta_mean, delta_var,
-                 attrib_num, label_col, checkpoint_dir, sample_dir, dataset_name, test_id, device):
+                 attrib_num, label_col, checkpoint_dir, sample_dir, dataset_name, test_id, device, lr, epochs):
         super().__init__()
         self.latent_dim = 32
         self.batch_size = batch_size
@@ -116,16 +130,19 @@ class VAETableGan(nn.Module):
         self.test_id = test_id
         self.device = device
         self.input_dim = input_dim
+        self.lr = lr
+        self.epochs = epochs
 
-        self.encoder = Encoder(input_dim * input_dim, self.latent_dim).to(device)
-        self.generator = Generator(self.latent_dim, output_channels=1).to(device)
+        D = input_dim * input_dim
+        self.encoder = Encoder(D, self.latent_dim).to(device)
+        self.generator = Generator(z_dim=self.latent_dim, output_channels=1).to(device)
         self.discriminator = Discriminator(input_channels=1).to(device)
         self.classifier = Classifier(input_channels=1).to(device)
 
-        self.opt_enc = torch.optim.Adam(self.encoder.parameters(), lr=0.001)
-        self.opt_gen = torch.optim.Adam(self.generator.parameters(), lr=0.001)
-        self.opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=0.001)
-        self.opt_cls = torch.optim.Adam(self.classifier.parameters(), lr=0.001)
+        self.opt_enc = torch.optim.Adam(self.encoder.parameters(), lr=lr)
+        self.opt_gen = torch.optim.Adam(self.generator.parameters(), lr=lr)
+        self.opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=lr)
+        self.opt_cls = torch.optim.Adam(self.classifier.parameters(), lr=lr)
 
         self.prev_gmean = None
         self.prev_gvar = None
@@ -179,22 +196,12 @@ class VAETableGan(nn.Module):
         return g_loss, disc_loss, class_loss.item(), recon_loss.item(), kl_loss.item(), adv_loss.item(), info_loss.item()
 
     def load_dataset(self):
-        data_path = f"dataset/{self.dataset_name}/{self.dataset_name}.csv"
-        X = pd.read_csv(data_path)
-        y = X['loan_status']
-        X = X.drop(columns=['loan_status'])
-
-        scaler = MinMaxScaler(feature_range=(-1, 1))
-        X_scaled = pd.DataFrame(scaler.fit_transform(X))
-
-        dim = self.input_dim
-        padded = padding_duplicating(X_scaled, dim * dim)
-        reshaped = reshape(pd.DataFrame(padded), dim)
-
-        X_tensor = torch.tensor(reshaped, dtype=torch.float32).unsqueeze(1)
-        y_tensor = torch.tensor(y.values, dtype=torch.long)
-
-        return TensorDataset(X_tensor, y_tensor)
+        return TabularDataset(
+            csv_path=f"dataset/{self.dataset_name}/{self.dataset_name}.csv",
+            input_dim=self.input_dim,
+            attrib_num=self.attrib_num,
+            label_col=self.label_col
+        )
 
     def model_dir(self):
         return f"{self.dataset_name}_{self.batch_size}_{self.input_dim}_{self.test_id}"
@@ -218,7 +225,7 @@ class VAETableGan(nn.Module):
         mlflow.log_param("alpha", self.alpha)
         mlflow.log_param("beta", self.beta)
 
-        for epoch in range(args.epoch):
+        for epoch in tqdm(range(args.epoch), desc="VAE-TableGAN Time"):
             self.train()
             for real_data, labels in train_loader:
                 real_data, labels = real_data.to(self.device), labels.to(self.device)
@@ -250,7 +257,19 @@ class VAETableGan(nn.Module):
             mlflow.log_metric("adv_loss", adv_loss, step=epoch)
             mlflow.log_metric("info_loss", info, step=epoch)
 
+            # ✅ W&B 로깅
+            wandb.log({
+                "g_loss": g_loss.item(),
+                "d_loss": d_loss.item(),
+                "c_loss": c_loss,
+                "recon_loss": r_loss,
+                "kl_loss": kl_loss,
+                "adv_loss": adv_loss,
+                "info_loss": info,
+            }, step=epoch)
+
             print(f"Epoch {epoch+1}/{args.epoch}: G={g_loss.item():.4f}, D={d_loss.item():.4f}, C={c_loss:.4f}, Recon={r_loss:.4f}, KL={kl_loss:.4f}, Info={info:.4f}")
 
         self.save()
         mlflow.end_run()
+        wandb.finish()

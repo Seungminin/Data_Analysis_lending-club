@@ -3,8 +3,29 @@ import torch
 import os
 import pandas as pd
 import numpy as np
+from torch.utils.data import Dataset
+from tqdm import tqdm
 from sklearn.preprocessing import MinMaxScaler
+from scipy.stats import wasserstein_distance
 
+class TabularDataset(Dataset):
+    def __init__(self, csv_path, input_dim, attrib_num, label_col=-1):
+        df = pd.read_csv(csv_path)
+        self.y = df['loan_status'].values.astype(int)
+        df = df.drop(columns=['loan_status'])
+
+        scaler = MinMaxScaler(feature_range=(-1, 1))
+        X_scaled = scaler.fit_transform(df)
+        self.X_padded = padding_duplicating(pd.DataFrame(X_scaled), input_dim * input_dim)
+        self.input_dim = input_dim
+
+    def __len__(self):
+        return len(self.X_padded)
+
+    def __getitem__(self, idx):
+        x = self.X_padded[idx].reshape(self.input_dim, self.input_dim).astype(np.float32)
+        return torch.tensor(x).unsqueeze(0), torch.tensor(self.y[idx]).long()
+    
 def pp(obj):
     from pprint import pprint
     pprint(obj)
@@ -13,7 +34,20 @@ def show_all_parameters(model):
     total = sum(p.numel() for p in model.parameters())
     print(f"Total parameters: {total:,}")
 
-def generate_data(model, save_dir, num_samples=10000):
+
+def compute_mmd(x, y, gamma=1.0):
+    """RBF kernel MMD between x,y torch tensors of shape [n, d]."""
+    xx = torch.exp(-gamma * ((x[:,None]-x[None,:])**2).sum(-1))
+    yy = torch.exp(-gamma * ((y[:,None]-y[None,:])**2).sum(-1))
+    xy = torch.exp(-gamma * ((x[:,None]-y[None,:])**2).sum(-1))
+    return xx.mean() + yy.mean() - 2*xy.mean()
+
+def compute_wasserstein(x, y):
+    """평균 feature-wise Wasserstein distance between numpy arrays x,y shape [n, d]."""
+    return np.mean([wasserstein_distance(x[:,i], y[:,i]) for i in range(x.shape[1])])
+
+
+def generate_data(model, save_dir, num_samples=10000, batch_size = 64):
     model.eval()
     os.makedirs(save_dir, exist_ok=True)
 
@@ -23,28 +57,35 @@ def generate_data(model, save_dir, num_samples=10000):
     original = original.drop(columns=['loan_status'])  
     feature_names = original.columns.tolist()
 
-    # 🔹 2. Create latent noise and generate synthetic data
-    z = torch.randn(num_samples, model.latent_dim).to(model.device)
-    with torch.no_grad():
-        fake = model.generator(z).cpu().numpy()
-
-    # 🔹 3. Postprocess: reshape and inverse scale
-    fake = fake.squeeze()  # shape: (N, H, W)
-    if len(fake.shape) == 3:
-        fake = fake.reshape(fake.shape[0], -1)  # (N, H×W)
-
-    scaler = MinMaxScaler(feature_range=(-1, 1))
+    scaler = MinMaxScaler(feature_range=(-1,1))
     scaler.fit(original)
-    fake_inverse = scaler.inverse_transform(fake[:, :original.shape[1]])
+    all_generated = []
 
-    for i, col in enumerate(feature_names):
-        real_unique = np.sort(original[col].unique())
-        indices = np.searchsorted(real_unique, fake_inverse[:, i], side="left")
-        indices = np.clip(indices, 0, len(real_unique) - 1)
-        fake_inverse[:, i] = real_unique[indices]
+    for i in tqdm(range(0, num_samples, batch_size), desc = 'Generate Samples'):
+        current_batch = min(batch_size, num_samples-1)
 
-    output_path = os.path.join(save_dir, f"{model.test_id}_generated.csv")
-    pd.DataFrame(fake_inverse, columns=feature_names).to_csv(output_path, index=False)
+        # 🔹 2. Create latent noise and generate synthetic data
+        z = torch.randn(current_batch, model.latent_dim).to(model.device)
+        with torch.no_grad():
+            fake = model.generator(z).cpu().numpy()
+
+        # 🔹 3. Postprocess: reshape and inverse scale
+        fake = fake.squeeze()  # shape: (N, H, W)
+        if len(fake.shape) == 3:
+            fake = fake.reshape(fake.shape[0], -1)  # (N, H×W)
+
+        fake_part = scaler.inverse_transform(fake[:, :original.shape[1]])
+
+        for j, col in enumerate(feature_names):
+            real_unique = np.sort(original[col].unique())
+            indices = np.searchsorted(real_unique, fake_part[:, j], side="left")
+            indices = np.clip(indices, 0, len(real_unique) - 1)
+            fake_part[:, j] = real_unique[indices]
+        all_generated.append(fake_part)
+    
+    full_generated = np.vstack(all_generated)
+    output_path = os.path.join(save_dir, f"{model.dataset_name}_{model.test_id}_generated.csv")
+    pd.DataFrame(full_generated, columns=feature_names).to_csv(output_path, index=False)
 
     print(f"[+] Generated data saved to {output_path}")
 
