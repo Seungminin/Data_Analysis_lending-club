@@ -1,107 +1,285 @@
-# utils.py
-import torch
 import os
+import wandb
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import pandas as pd
 import numpy as np
-from torch.utils.data import Dataset
-from tqdm import tqdm
+from torch.utils.data import Dataset, DataLoader, random_split
 from sklearn.preprocessing import MinMaxScaler
-from scipy.stats import wasserstein_distance
+from tqdm import tqdm
 
-class TabularDataset(Dataset):
-    def __init__(self, csv_path, input_dim, attrib_num, label_col=-1):
-        df = pd.read_csv(csv_path)
-        self.y = df['loan_status'].values.astype(int)
-        df = df.drop(columns=['loan_status'])
+from ops import reparameterize, init_weights
+from utils import TabularDataset, compute_mmd, compute_wasserstein
+import mlflow
 
-        scaler = MinMaxScaler(feature_range=(-1, 1))
-        X_scaled = scaler.fit_transform(df)
-        self.X_padded = padding_duplicating(pd.DataFrame(X_scaled), input_dim * input_dim)
-        self.input_dim = input_dim
+class Encoder(nn.Module):
+    def __init__(self, input_dim, latent_dim):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, 1024)
+        self.bn1 = nn.BatchNorm1d(1024)
+        self.fc_mu = nn.Linear(1024, latent_dim)
+        self.fc_logvar = nn.Linear(1024, latent_dim)
+        self.apply(init_weights)
 
-    def __len__(self):
-        return len(self.X_padded)
+    def forward(self, x):
+        h = F.relu(self.bn1(self.fc1(x)))
+        mu = self.fc_mu(h)
+        logvar = self.fc_logvar(h)
+        z = reparameterize(mu, logvar)
+        return z, mu, logvar
 
-    def __getitem__(self, idx):
-        x = self.X_padded[idx].reshape(self.input_dim, self.input_dim).astype(np.float32)
-        return torch.tensor(x).unsqueeze(0), torch.tensor(self.y[idx]).long()
-    
-def pp(obj):
-    from pprint import pprint
-    pprint(obj)
+class Generator(nn.Module):
+    def __init__(self, z_dim=32, feature_maps=64, output_channels=1):
+        super().__init__()
+        self.fc = nn.Linear(z_dim, feature_maps * 8 * 4 * 4)
+        self.deconv = nn.Sequential(
+            nn.BatchNorm2d(feature_maps * 8), nn.ReLU(True),
+            nn.ConvTranspose2d(feature_maps * 8, feature_maps * 4, 4, 2, 1),
+            nn.BatchNorm2d(feature_maps * 4), nn.ReLU(True),
+            nn.ConvTranspose2d(feature_maps * 4, feature_maps * 2, 4, 2, 1),
+            nn.BatchNorm2d(feature_maps * 2), nn.ReLU(True),
+            nn.ConvTranspose2d(feature_maps * 2, feature_maps,   4, 2, 1),
+            nn.BatchNorm2d(feature_maps),       nn.ReLU(True),
+            nn.ConvTranspose2d(feature_maps,     output_channels,4, 2, 1),
+            nn.Tanh()
+        )
 
-def show_all_parameters(model):
-    total = sum(p.numel() for p in model.parameters())
-    print(f"Total parameters: {total:,}")
+    def forward(self, z):
+        x = self.fc(z).view(z.size(0), -1, 4, 4)
+        return self.deconv(x)
 
+class Discriminator(nn.Module):
+    def __init__(self, input_channels=1, feature_maps=64):
+        super().__init__()
+        self.main = nn.Sequential(
+            nn.Conv2d(input_channels, feature_maps, 4, 2, 1),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(feature_maps, feature_maps*2, 4, 2, 1),
+            nn.BatchNorm2d(feature_maps*2), nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(feature_maps*2, feature_maps*4, 4, 2, 1),
+            nn.BatchNorm2d(feature_maps*4), nn.LeakyReLU(0.2, inplace=True),
+            nn.AdaptiveAvgPool2d((1,1))
+        )
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(feature_maps*4, 1),
+            nn.Sigmoid()
+        )
 
-def compute_mmd(x, y, gamma=1.0):
-    """RBF kernel MMD between x,y torch tensors of shape [n, d]."""
-    xx = torch.exp(-gamma * ((x[:,None]-x[None,:])**2).sum(-1))
-    yy = torch.exp(-gamma * ((y[:,None]-y[None,:])**2).sum(-1))
-    xy = torch.exp(-gamma * ((x[:,None]-y[None,:])**2).sum(-1))
-    return xx.mean() + yy.mean() - 2*xy.mean()
+    def forward(self, x):
+        return self.classifier(self.main(x))
 
-def compute_wasserstein(x, y):
-    """평균 feature-wise Wasserstein distance between numpy arrays x,y shape [n, d]."""
-    return np.mean([wasserstein_distance(x[:,i], y[:,i]) for i in range(x.shape[1])])
+class Classifier(nn.Module):
+    def __init__(self, input_channels=1, feature_maps=64, num_classes=2):
+        super().__init__()
+        self.main = nn.Sequential(
+            nn.Conv2d(input_channels, feature_maps, 4, 2, 1),
+            nn.BatchNorm2d(feature_maps), nn.ReLU(True),
+            nn.Conv2d(feature_maps, feature_maps*2, 4, 2, 1),
+            nn.BatchNorm2d(feature_maps*2), nn.ReLU(True),
+            nn.Conv2d(feature_maps*2, feature_maps*4, 4, 2, 1),
+            nn.BatchNorm2d(feature_maps*4), nn.ReLU(True),
+            nn.AdaptiveAvgPool2d((1,1))
+        )
+        self.classifier = nn.Linear(feature_maps*4, num_classes)
 
+    def forward(self, x):
+        x = self.main(x).view(x.size(0), -1)
+        return self.classifier(x)
 
-def generate_data(model, save_dir, num_samples=10000, batch_size = 64):
-    model.eval()
-    os.makedirs(save_dir, exist_ok=True)
+class VAETableGan(nn.Module):
+    def __init__(self,
+                 input_dim,
+                 batch_size,
+                 y_dim,
+                 delta_mean,
+                 delta_var,
+                 attrib_num,
+                 label_col,
+                 checkpoint_dir,
+                 sample_dir,
+                 dataset_name,
+                 test_id,
+                 device,
+                 lambda_vae: float = 1.0,
+                 lambda_info: float = 1.0,
+                 lambda_advcls: float = 1.0,
+                 val_split: float = 0.1):
+        super().__init__()
+        self.latent_dim     = 32
+        self.batch_size     = batch_size
+        self.delta_mean     = delta_mean
+        self.delta_var      = delta_var
+        self.attrib_num     = attrib_num
+        self.label_col      = label_col
+        self.checkpoint_dir = checkpoint_dir
+        self.sample_dir     = sample_dir
+        self.dataset_name   = dataset_name
+        self.test_id        = test_id
+        self.device         = device
+        self.input_dim      = input_dim
 
-    # 🔹 1. Load original dataset to match structure
-    data_path = f'dataset/{model.dataset_name}/{model.dataset_name}.csv'
-    original = pd.read_csv(data_path)
-    original = original.drop(columns=['loan_status'])  
-    feature_names = original.columns.tolist()
+        self.lambda_vae     = lambda_vae
+        self.lambda_info    = lambda_info
+        self.lambda_advcls  = lambda_advcls
+        self.val_split      = val_split
 
-    scaler = MinMaxScaler(feature_range=(-1,1))
-    scaler.fit(original)
-    all_generated = []
+        self.encoder       = Encoder(input_dim*input_dim, self.latent_dim).to(device)
+        self.generator     = Generator(z_dim=self.latent_dim, output_channels=1).to(device)
+        self.discriminator = Discriminator(input_channels=1).to(device)
+        self.classifier    = Classifier(input_channels=1, num_classes=y_dim).to(device)
 
-    for i in tqdm(range(0, num_samples, batch_size), desc = 'Generate Samples'):
-        current_batch = min(batch_size, num_samples-1)
+        self.opt_enc  = torch.optim.Adam(self.encoder.parameters(), lr=2e-4)
+        self.opt_gen  = torch.optim.Adam(self.generator.parameters(), lr=2e-4)
+        self.opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=2e-4)
+        self.opt_cls  = torch.optim.Adam(self.classifier.parameters(), lr=2e-4)
 
-        # 🔹 2. Create latent noise and generate synthetic data
-        z = torch.randn(current_batch, model.latent_dim).to(model.device)
-        with torch.no_grad():
-            fake = model.generator(z).cpu().numpy()
+        self.prev_gmean = None
+        self.prev_gvar  = None
 
-        # 🔹 3. Postprocess: reshape and inverse scale
-        fake = fake.squeeze()  # shape: (N, H, W)
-        if len(fake.shape) == 3:
-            fake = fake.reshape(fake.shape[0], -1)  # (N, H×W)
+    def forward(self, x):
+        z, mu, logvar = self.encoder(x.view(x.size(0), -1))
+        return self.generator(z), mu, logvar
 
-        fake_part = scaler.inverse_transform(fake[:, :original.shape[1]])
+    def compute_losses(self, real_data, labels):
+        real_flat = real_data.view(real_data.size(0), -1)
+        z, mu, logvar = self.encoder(real_flat)
+        fake_data     = self.generator(z)
 
-        for j, col in enumerate(feature_names):
-            real_unique = np.sort(original[col].unique())
-            indices = np.searchsorted(real_unique, fake_part[:, j], side="left")
-            indices = np.clip(indices, 0, len(real_unique) - 1)
-            fake_part[:, j] = real_unique[indices]
-        all_generated.append(fake_part)
-    
-    full_generated = np.vstack(all_generated)
-    output_path = os.path.join(save_dir, f"{model.dataset_name}_{model.test_id}_generated.csv")
-    pd.DataFrame(full_generated, columns=feature_names).to_csv(output_path, index=False)
+        real_score = self.discriminator(real_data)
+        fake_score = self.discriminator(fake_data.detach())
 
-    print(f"[+] Generated data saved to {output_path}")
+        # VAE
+        rec_loss = F.mse_loss(fake_data, real_data)
+        kl_loss  = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+        vae_loss = rec_loss + kl_loss
 
-def padding_duplicating(data, row_size):
-    arr_data = np.array(data.values.tolist())
-    col_num = arr_data.shape[1]
-    npad = ((0, 0), (0, row_size - col_num))
-    arr_data = np.pad(arr_data, pad_width=npad, mode='constant', constant_values=0.)
+        # adversarial + classification
+        adv_loss = F.binary_cross_entropy(fake_score, torch.ones_like(fake_score))
+        real_logits = self.classifier(real_data)
+        fake_logits = self.classifier(fake_data)
+        cls_loss    = F.cross_entropy(real_logits, labels) + F.cross_entropy(fake_logits, labels)
+        advcls_loss = adv_loss + cls_loss
 
-    for i in range(1, arr_data.shape[1] // col_num):
-        arr_data[:, col_num * i: col_num * (i + 1)] = arr_data[:, 0: col_num]
+        # info matching
+        mean_r = torch.mean(real_score, dim=0, keepdim=True)
+        mean_f = torch.mean(fake_score, dim=0, keepdim=True)
+        var_r  = torch.var(real_score,  dim=0, keepdim=True)
+        var_f  = torch.var(fake_score,  dim=0, keepdim=True)
+        if self.prev_gmean is None:
+            self.prev_gmean = mean_r.detach()
+            self.prev_gvar  = var_r.detach()
+        gmean_r = 0.99 * self.prev_gmean + 0.01 * mean_r
+        gmean_f = 0.99 * self.prev_gmean + 0.01 * mean_f
+        gvar_r  = 0.99 * self.prev_gvar  + 0.01 * var_r
+        gvar_f  = 0.99 * self.prev_gvar  + 0.01 * var_f
+        info_loss = (
+            torch.sum(torch.clamp(torch.abs(gmean_r - gmean_f) - self.delta_mean, min=0.0)) +
+            torch.sum(torch.clamp(torch.abs(gvar_r  - gvar_f)  - self.delta_var,  min=0.0))
+        )
+        self.prev_gmean = gmean_r.detach()
+        self.prev_gvar  = gvar_r.detach()
 
-    return arr_data
+        g_loss = (
+            self.lambda_vae    * vae_loss   +
+            self.lambda_info   * info_loss  +
+            self.lambda_advcls * advcls_loss
+        )
+        d_loss = (
+            F.binary_cross_entropy(real_score, torch.ones_like(real_score)) +
+            F.binary_cross_entropy(fake_score, torch.zeros_like(fake_score))
+        )
+        return g_loss, d_loss, cls_loss.item(), rec_loss.item(), kl_loss.item(), adv_loss.item(), info_loss.item()
 
-def reshape(data, dim=None):
-    if dim:
-        return data.values.reshape(data.shape[0], dim, dim)
-    else:
-        return data.values.reshape(data.shape[0], -1)
+    def train_model(self, args):
+        full_ds   = TabularDataset(f"dataset/{self.dataset_name}/{self.dataset_name}.csv",
+                                   self.input_dim, self.attrib_num, self.label_col)
+        n_total   = len(full_ds)
+        n_val     = int(self.val_split * n_total)
+        n_train   = n_total - n_val
+        train_ds, val_ds = random_split(full_ds, [n_train, n_val])
+        train_loader = DataLoader(train_ds, batch_size=self.batch_size, shuffle=True)
+        val_loader   = DataLoader(val_ds, batch_size=self.batch_size, shuffle=False)
+
+        mlflow.set_experiment("VAE-TableGAN")
+        mlflow.start_run()
+        mlflow.log_param("epochs",        args.epoch)
+        mlflow.log_param("lambda_vae",    self.lambda_vae)
+        mlflow.log_param("lambda_info",   self.lambda_info)
+        mlflow.log_param("lambda_advcls", self.lambda_advcls)
+
+        for epoch in tqdm(range(args.epoch), desc="VAE-TableGAN"):
+            self.train()
+            for real_data, labels in train_loader:
+                real_data, labels = real_data.to(self.device), labels.to(self.device)
+                self.opt_enc.zero_grad()
+                self.opt_gen.zero_grad()
+                self.opt_disc.zero_grad()
+                self.opt_cls.zero_grad()
+
+                g_loss, d_loss, c_loss, r_loss, kl_loss, adv_loss, info_loss = \
+                    self.compute_losses(real_data, labels)
+
+                g_loss.backward(retain_graph=True)
+                self.opt_enc.step()
+                self.opt_gen.step()
+
+                d_loss.backward()
+                self.opt_disc.step()
+
+                self.opt_cls.zero_grad()
+                real_logits = self.classifier(real_data)
+                cls_only   = F.cross_entropy(real_logits, labels)
+                cls_only.backward()
+                self.opt_cls.step()
+
+            # validation
+            self.eval()
+            with torch.no_grad():
+                real_list = [x for x, _ in val_loader]
+                real_batch = torch.cat(real_list, 0).to(self.device)
+                n_val_total = real_batch.size(0)
+                z = torch.randn(n_val_total, self.latent_dim, device=self.device)
+                fake_batch = self.generator(z)
+
+                real_flat = real_batch.view(n_val_total, -1)
+                fake_flat = fake_batch.view(n_val_total, -1)
+
+                mmd = compute_mmd(real_flat, fake_flat).item()
+                wd  = compute_wasserstein(real_flat.cpu().numpy(),
+                                          fake_flat.cpu().numpy())
+
+            mlflow.log_metric("val_mmd", mmd, step=epoch)
+            mlflow.log_metric("val_wd",  wd,  step=epoch)
+            wandb.log({"val_mmd": mmd, "val_wd": wd}, step=epoch)
+
+            mlflow.log_metric("g_loss",     g_loss.item(), step=epoch)
+            mlflow.log_metric("d_loss",     d_loss.item(), step=epoch)
+            mlflow.log_metric("c_loss",     c_loss,       step=epoch)
+            mlflow.log_metric("recon_loss", r_loss,       step=epoch)
+            mlflow.log_metric("kl_loss",    kl_loss,      step=epoch)
+            mlflow.log_metric("adv_loss",   adv_loss,     step=epoch)
+            mlflow.log_metric("info_loss",  info_loss,    step=epoch)
+
+            wandb.log({
+                "g_loss":     g_loss.item(),
+                "d_loss":     d_loss.item(),
+                "c_loss":     c_loss,
+                "recon_loss": r_loss,
+                "kl_loss":    kl_loss,
+                "adv_loss":   adv_loss,
+                "info_loss":  info_loss,
+            }, step=epoch)
+
+            print(f"[{epoch+1}/{args.epoch}] G={g_loss.item():.4f}, D={d_loss.item():.4f}, "
+                  f"C={c_loss:.4f}, Recon={r_loss:.4f}, KL={kl_loss:.4f}, INFO={info_loss:.4f}, "
+                  f"MMD={mmd:.4f}, WD={wd:.4f}")
+
+            self.train()
+
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        torch.save(self.state_dict(),
+                   os.path.join(self.checkpoint_dir, f'{self.test_id}_model.pt'))
+        mlflow.end_run()
+        wandb.finish()
