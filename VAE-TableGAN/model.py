@@ -196,12 +196,8 @@ class VAETableGan(nn.Module):
     def train_model(self, args):
         full_ds   = TabularDataset(f"dataset/{self.dataset_name}/{self.dataset_name}.csv",
                                    self.input_dim, self.attrib_num, self.label_col)
-        n_total   = len(full_ds)
-        n_val     = int(self.val_split * n_total)
-        n_train   = n_total - n_val
-        train_ds, val_ds = random_split(full_ds, [n_train, n_val])
-        train_loader = DataLoader(train_ds, batch_size=self.batch_size, shuffle=True)
-        val_loader   = DataLoader(val_ds, batch_size=self.batch_size, shuffle=False)
+        
+        train_loader = DataLoader(full_ds, batch_size=self.batch_size, shuffle=True)
 
         mlflow.set_experiment("VAE-TableGAN")
         mlflow.start_run()
@@ -235,29 +231,6 @@ class VAETableGan(nn.Module):
                 cls_only.backward()
                 self.opt_cls.step()
 
-            # validation metrics
-            self.eval()
-            all_real = []; all_fake = []
-            with torch.no_grad():
-                for x_val, _ in val_loader:
-                    all_real.append(x_val)
-                real_batch = torch.cat(all_real, dim=0).to(self.device)
-                n_val_total = real_batch.size(0)
-                z = torch.randn(n_val_total, self.latent_dim, device=self.device)
-                fake_batch = self.generator(z)
-                real_np = real_batch.view(n_val_total, -1).cpu().numpy()
-                fake_np = fake_batch.view(n_val_total, -1).cpu().numpy()
-
-                mmd = self._compute_mmd(real_np, fake_np)
-                wd = np.mean([
-                    wasserstein_distance(real_np[:, i], fake_np[:, i])
-                    for i in range(real_np.shape[1])
-                ])
-
-            mlflow.log_metric("val_mmd", mmd, step=epoch)
-            mlflow.log_metric("val_wd",  wd,  step=epoch)
-            wandb.log({"val_mmd": mmd, "val_wd": wd}, step=epoch)
-
             mlflow.log_metric("g_loss",     g_loss.item(), step=epoch)
             mlflow.log_metric("d_loss",     d_loss.item(), step=epoch)
             mlflow.log_metric("c_loss",     c_loss,       step=epoch)
@@ -277,8 +250,7 @@ class VAETableGan(nn.Module):
             }, step=epoch)
 
             print(f"[{epoch+1}/{args.epoch}] G={g_loss.item():.4f}, D={d_loss.item():.4f}, "
-                  f"C={c_loss:.4f}, Recon={r_loss:.4f}, KL={kl_loss:.4f}, INFO={info_loss:.4f}, "
-                  f"MMD={mmd:.4f}, WD={wd:.4f}")
+                  f"C={c_loss:.4f}, Recon={r_loss:.4f}, KL={kl_loss:.4f}, INFO={info_loss:.4f}")
 
             self.train()
 

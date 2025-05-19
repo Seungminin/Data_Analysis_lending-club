@@ -9,7 +9,7 @@ from utils import pp, generate_data, show_all_parameters
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--epoch',       type=int,   default=10)
-    parser.add_argument('--lr',          type=float, default=0.0002)
+    parser.add_argument('--lr',          type=float, default=0.001)
     parser.add_argument('--batch_size',  type=int,   default=64)
     parser.add_argument('--input_dim',   type=int,   default=64)   # will be treated as image width/height
     parser.add_argument('--dataset',     type=str,   default='loan_1')
@@ -52,7 +52,6 @@ def main():
         raise ValueError(f"Unknown test_id: {args.test_id}")
     cfg = test_configs[args.test_id]
 
-    # args에 새 하이퍼파라미터 붙이기
     args.lambda_vae    = cfg['lambda_vae']
     args.lambda_info   = cfg['lambda_info']
     args.lambda_advcls = cfg['lambda_advcls']
