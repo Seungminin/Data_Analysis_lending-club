@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/4c28fd4b933b4c3d877061235a8c455e/artifacts
+end_time: 1747755529204
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: 4c28fd4b933b4c3d877061235a8c455e
+run_name: thundering-cub-766
+run_uuid: 4c28fd4b933b4c3d877061235a8c455e
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747755348543
+status: 3
+tags: []
+user_id: chochoa

@@ -9,7 +9,7 @@ from utils import pp, generate_data, show_all_parameters
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--epoch',       type=int,   default=1)
-    parser.add_argument('--lr',          type=float, default=0.001)
+    parser.add_argument('--lr',          type=float, default=0.0002)
     parser.add_argument('--batch_size',  type=int,   default=64)
     parser.add_argument('--input_dim',   type=int,   default=32)   # will be treated as image width/height
     parser.add_argument('--dataset',     type=str,   default='loan_1')
@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument('--test_id',     type=str,   default='test1')
     parser.add_argument('--label_col',   type=int,   default=-1)
     parser.add_argument('--attrib_num',  type=int,   default=15)
-    parser.add_argument('--pre_epochs',  type=int,   default=1)
+    parser.add_argument('--pre_epochs',  type=int,   default=3)
     return parser.parse_args()
 
 def main():
@@ -27,7 +27,7 @@ def main():
 
     test_configs = {
         'test1': {
-            'lambda_vae':    1.0,
+            'lambda_vae':    0.1,
             'lambda_info':   1.0,
             'lambda_advcls': 1.0,
             'delta_mean':    0.0,
@@ -75,7 +75,7 @@ def main():
         test_id       = args.test_id,
         device        = device,
         lr            = args.lr,
-        pre_epochs    = 1,
+        pre_epochs    = args.pre_epochs,
         epochs        = args.epoch,
         lambda_vae    = args.lambda_vae,
         lambda_info   = args.lambda_info,

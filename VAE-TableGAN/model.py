@@ -53,7 +53,7 @@ class Generator(nn.Module):
 class Discriminator(nn.Module):
     def __init__(self, input_channels=1, feature_maps=32):
         super().__init__()
-        self.main = nn.Sequential(
+        self.feature_extractor = nn.Sequential(
             nn.Conv2d(input_channels, feature_maps, 4,2,1),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(feature_maps, feature_maps*2, 4,2,1),
@@ -68,8 +68,12 @@ class Discriminator(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, x):
-        return self.classifier(self.main(x))
+    def forward(self, x, return_features=False):
+        features = self.feature_extractor(x)
+        scores = self.classifier(features)
+        if return_features:
+            return scores, features.view(x.size(0), -1)
+        return scores
 
 
 class Classifier(nn.Module):
@@ -139,7 +143,8 @@ class VAETableGan(nn.Module):
 
         # optimizers
         self.opt_enc  = torch.optim.Adam(self.encoder.parameters(),       lr=lr)
-        self.opt_gen  = torch.optim.Adam(list(self.generator_vae.parameters()),     lr=lr)
+        self.opt_gen  = torch.optim.Adam(list(self.generator.parameters()),     lr=lr)
+        self.opt_gen_vae  = torch.optim.Adam(list(self.generator_vae.parameters()),     lr=lr)
         self.opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=lr)
         self.opt_cls  = torch.optim.Adam(self.classifier.parameters(),    lr=lr)
 
@@ -159,20 +164,26 @@ class VAETableGan(nn.Module):
         advcls     = adv_loss + cls_loss
         return advcls, d_loss, adv_loss, cls_loss
 
-    def compute_info_loss(self, real_score, fake_score):
-        mean_r = real_score.mean(0, keepdim=True)
-        mean_f = fake_score.mean(0, keepdim=True)
-        var_r  = real_score.var(0, keepdim=True)
-        var_f  = fake_score.var(0, keepdim=True)
+    def compute_info_loss(self, real_feat, fake_feat):
+        mean_r = real_feat.mean(0, keepdim=True)
+        mean_f = fake_feat.mean(0, keepdim=True)
+        var_r  = real_feat.var(0, keepdim=True)
+        var_f  = fake_feat.var(0, keepdim=True)
+
         if self.prev_gmean is None:
             self.prev_gmean = mean_r.detach()
             self.prev_gvar  = var_r.detach()
+
         gmean_r = 0.99*self.prev_gmean + 0.01*mean_r
         gmean_f = 0.99*self.prev_gmean + 0.01*mean_f
         gvar_r  = 0.99*self.prev_gvar  + 0.01*var_r
         gvar_f  = 0.99*self.prev_gvar  + 0.01*var_f
-        info_loss = (torch.clamp((gmean_r-gmean_f).abs() - self.delta_mean, min=0).sum() +
-                     torch.clamp((gvar_r -gvar_f ).abs() - self.delta_var,  min=0).sum())
+
+        info_loss = (
+            torch.clamp((gmean_r - gmean_f).abs() - self.delta_mean, min=0).sum() +
+            torch.clamp((gvar_r  - gvar_f ).abs() - self.delta_var,  min=0).sum()
+        )
+
         self.prev_gmean, self.prev_gvar = gmean_r.detach(), gvar_r.detach()
         return info_loss
 
@@ -198,9 +209,9 @@ class VAETableGan(nn.Module):
                 kl  = (-0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp()))
                 loss = rec + kl
 
-                self.opt_enc.zero_grad(); self.opt_gen.zero_grad()
+                self.opt_enc.zero_grad(); self.opt_gen_vae.zero_grad()
                 loss.backward()
-                self.opt_enc.step(); self.opt_gen.step()
+                self.opt_enc.step(); self.opt_gen_vae.step()
 
                 rec_total += rec.item(); kl_total += kl.item()
 
@@ -210,60 +221,77 @@ class VAETableGan(nn.Module):
             }, step=epoch)
 
     def fine_tune(self, train_loader):
-        lambda_advcls = 0.0
-        adv_step = 1.0 / self.epochs
+
+        for param in self.encoder.parameters():
+            param.requires_grad = False
+
+        self.opt_gen = torch.optim.Adam(self.generator.parameters(), lr=self.opt_gen.param_groups[0]['lr'])
 
         for epoch in range(self.epochs):
             g_totals = {'vae':0, 'info':0, 'advcls':0}
             d_total = 0
+
             for x, y in tqdm(train_loader, desc=f"Fine-tune Epoch {epoch+1}/{self.epochs}"):
                 x, y = x.to(self.device), y.to(self.device)
                 flat = x.view(x.size(0), -1)
-                z, mu, logvar = self.encoder(flat)
+                with torch.no_grad(): 
+                    z, mu, logvar = self.encoder(flat)
+
                 x_hat = self.generator(z)
 
-                # VAE
                 rec = F.mse_loss(x_hat, x)
                 kl  = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
                 vae = rec + kl
 
-                # GAN + cls
                 advcls, d_loss, adv, cls = self.compute_gan_losses(x, x_hat, y)
 
-                # info
-                real_score = self.discriminator(x)
-                fake_score = self.discriminator(x_hat)
-                info = self.compute_info_loss(real_score, fake_score)
+                real_score, real_feat = self.discriminator(x, return_features=True)
+                fake_score, fake_feat = self.discriminator(x_hat, return_features=True)
+                info = self.compute_info_loss(real_feat, fake_feat)
 
-                # generator loss
                 g_loss = (self.lambda_vae * vae +
                           self.lambda_info * info +
-                          lambda_advcls    * advcls)
+                          self.lambda_advcls * advcls)
 
-                # update enc+gen
-                self.opt_enc.zero_grad(); self.opt_gen.zero_grad()
-                g_loss.backward(retain_graph=True)
-                self.opt_enc.step(); self.opt_gen.step()
-
-                # update disc
+                # D update
                 self.opt_disc.zero_grad()
                 d_loss.backward()
                 self.opt_disc.step()
 
-                # update classifier on real only
+                # G update twice
+                for _ in range(2):
+                    self.opt_gen.zero_grad()
+
+                    x_hat = self.generator(z)
+                    rec = F.mse_loss(x_hat, x)
+                    kl  = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+                    vae = rec + kl
+
+                    advcls, _, _, _ = self.compute_gan_losses(x, x_hat, y)
+                    _, real_feat = self.discriminator(x, return_features=True)
+                    _, fake_feat = self.discriminator(x_hat, return_features=True)
+                    info = self.compute_info_loss(real_feat, fake_feat)
+
+                    g_loss = (self.lambda_vae * vae +
+                            self.lambda_info * info +
+                            self.lambda_advcls * advcls)
+
+                    g_loss.backward()
+                    self.opt_gen.step()
+                
+                # C update
                 self.opt_cls.zero_grad()
                 real_logits = self.classifier(x)
                 loss_rcls  = F.cross_entropy(real_logits, y)
                 loss_rcls.backward()
                 self.opt_cls.step()
 
-                # accumulate
                 g_totals['vae']   += vae.item()
                 g_totals['info']  += info.item()
                 g_totals['advcls']+= advcls.item()
                 d_total           += d_loss.item()
 
-            lambda_advcls = min(1.0, lambda_advcls + adv_step)
+
             wandb.log({
                 "ft_vae_loss":   g_totals['vae']/len(train_loader),
                 "ft_info_loss":  g_totals['info']/len(train_loader),
