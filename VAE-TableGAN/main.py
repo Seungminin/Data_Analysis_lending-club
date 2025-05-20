@@ -8,10 +8,10 @@ from utils import pp, generate_data, show_all_parameters
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epoch',       type=int,   default=10)
+    parser.add_argument('--epoch',       type=int,   default=1)
     parser.add_argument('--lr',          type=float, default=0.001)
     parser.add_argument('--batch_size',  type=int,   default=64)
-    parser.add_argument('--input_dim',   type=int,   default=64)   # will be treated as image width/height
+    parser.add_argument('--input_dim',   type=int,   default=32)   # will be treated as image width/height
     parser.add_argument('--dataset',     type=str,   default='loan_1')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoint')
     parser.add_argument('--sample_dir',     type=str, default='samples')
@@ -19,12 +19,12 @@ def parse_args():
     parser.add_argument('--test_id',     type=str,   default='test1')
     parser.add_argument('--label_col',   type=int,   default=-1)
     parser.add_argument('--attrib_num',  type=int,   default=15)
+    parser.add_argument('--pre_epochs',  type=int,   default=1)
     return parser.parse_args()
 
 def main():
     args = parse_args()
 
-    # 각 테스트별 lambda_vae, lambda_info, lambda_advcls 그리고 delta_mean, delta_var 설정
     test_configs = {
         'test1': {
             'lambda_vae':    1.0,
@@ -74,6 +74,9 @@ def main():
         dataset_name  = args.dataset,
         test_id       = args.test_id,
         device        = device,
+        lr            = args.lr,
+        pre_epochs    = 1,
+        epochs        = args.epoch,
         lambda_vae    = args.lambda_vae,
         lambda_info   = args.lambda_info,
         lambda_advcls = args.lambda_advcls

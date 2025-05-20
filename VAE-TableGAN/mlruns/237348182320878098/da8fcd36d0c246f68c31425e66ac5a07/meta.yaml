@@ -1,5 +1,5 @@
 artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/da8fcd36d0c246f68c31425e66ac5a07/artifacts
-end_time: null
+end_time: 1747681866481
 entry_point_name: ''
 experiment_id: '237348182320878098'
 lifecycle_stage: active
@@ -10,6 +10,6 @@ source_name: ''
 source_type: 4
 source_version: ''
 start_time: 1747646443433
-status: 1
+status: 3
 tags: []
 user_id: chochoa

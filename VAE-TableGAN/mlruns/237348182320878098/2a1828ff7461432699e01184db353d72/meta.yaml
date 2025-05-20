@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/2a1828ff7461432699e01184db353d72/artifacts
+end_time: 1747723985366
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: 2a1828ff7461432699e01184db353d72
+run_name: bemused-hawk-893
+run_uuid: 2a1828ff7461432699e01184db353d72
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747723905710
+status: 3
+tags: []
+user_id: chochoa
