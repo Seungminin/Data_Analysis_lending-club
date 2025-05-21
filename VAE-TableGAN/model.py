@@ -130,6 +130,7 @@ class VAETableGan(nn.Module):
         self.input_dim      = input_dim * input_dim
         self.pre_epochs     = pre_epochs
         self.epochs         = epochs
+        self.global_step    = 0
         self.lambda_vae     = lambda_vae
         self.lambda_info    = lambda_info
         self.lambda_advcls  = lambda_advcls
@@ -137,14 +138,12 @@ class VAETableGan(nn.Module):
         # modules
         self.encoder       = Encoder(self.input_dim, self.latent_dim).to(device)
         self.generator     = Generator(z_dim=self.latent_dim).to(device)
-        self.generator_vae = Generator(z_dim=self.latent_dim).to(device)
         self.discriminator = Discriminator().to(device)
         self.classifier    = Classifier(num_classes=y_dim).to(device)
 
         # optimizers
         self.opt_enc  = torch.optim.Adam(self.encoder.parameters(),       lr=lr)
         self.opt_gen  = torch.optim.Adam(list(self.generator.parameters()),     lr=lr)
-        self.opt_gen_vae  = torch.optim.Adam(list(self.generator_vae.parameters()),     lr=lr)
         self.opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=lr)
         self.opt_cls  = torch.optim.Adam(self.classifier.parameters(),    lr=lr)
 
@@ -189,11 +188,11 @@ class VAETableGan(nn.Module):
 
     def save(self):
         os.makedirs(self.checkpoint_dir, exist_ok=True)
-        path = os.path.join(self.checkpoint_dir, f"{self.dataset_name}_{self.test_id}_model.pt")
+        path = os.path.join(self.checkpoint_dir, f"{self.dataset_name}_{self.test_id}_{self.pre_epochs}_model.pt")
         torch.save(self.state_dict(), path)
 
     def load(self):
-        path = os.path.join(self.checkpoint_dir, f"{self.dataset_name}_{self.test_id}_model.pt")
+        path = os.path.join(self.checkpoint_dir, f"{self.dataset_name}_{self.test_id}_{self.pre_epochs}_model.pt")
         self.load_state_dict(torch.load(path, map_location=self.device))
         self.eval()
 
@@ -204,21 +203,22 @@ class VAETableGan(nn.Module):
                 x = x.to(self.device)
                 flat = x.view(x.size(0), -1)
                 z, mu, logvar = self.encoder(flat)
-                x_hat = self.generator_vae(z)
+                x_hat = self.generator(z)
                 rec = F.mse_loss(x_hat, x)
                 kl  = (-0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp()))
                 loss = rec + kl
 
-                self.opt_enc.zero_grad(); self.opt_gen_vae.zero_grad()
+                self.opt_enc.zero_grad(); self.opt_gen.zero_grad()
                 loss.backward()
-                self.opt_enc.step(); self.opt_gen_vae.step()
+                self.opt_enc.step(); self.opt_gen.step()
 
                 rec_total += rec.item(); kl_total += kl.item()
 
             wandb.log({
                 "pre_rec_loss": rec_total/len(train_loader),
                 "pre_kl_loss":  kl_total/len(train_loader)
-            }, step=epoch)
+            }, step=self.global_step)
+            self.global_step += 1
 
     def fine_tune(self, train_loader):
 
@@ -227,7 +227,7 @@ class VAETableGan(nn.Module):
 
         self.opt_gen = torch.optim.Adam(self.generator.parameters(), lr=self.opt_gen.param_groups[0]['lr'])
 
-        for epoch in range(self.epochs):
+        for epoch in tqdm(range(self.epochs), desc = "Fine Tuning"):
             g_totals = {'vae':0, 'info':0, 'advcls':0}
             d_total = 0
 
@@ -284,7 +284,7 @@ class VAETableGan(nn.Module):
                 real_logits = self.classifier(x)
                 loss_rcls  = F.cross_entropy(real_logits, y)
                 loss_rcls.backward()
-                self.opt_cls.step()
+                self.opt_cls.step() 
 
                 g_totals['vae']   += vae.item()
                 g_totals['info']  += info.item()
@@ -297,8 +297,8 @@ class VAETableGan(nn.Module):
                 "ft_info_loss":  g_totals['info']/len(train_loader),
                 "ft_advcls_loss":g_totals['advcls']/len(train_loader),
                 "ft_d_loss":     d_total/len(train_loader)
-            }, step=epoch)
-
+            }, step=self.global_step)
+            self.global_step += 1
     def train_model(self, args):
         ds = TabularDataset(f"dataset/{self.dataset_name}/{self.dataset_name}.csv",
                              int((self.input_dim)**0.5), self.attrib_num, self.label_col)

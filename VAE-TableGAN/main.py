@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument('--test_id',     type=str,   default='test1')
     parser.add_argument('--label_col',   type=int,   default=-1)
     parser.add_argument('--attrib_num',  type=int,   default=15)
-    parser.add_argument('--pre_epochs',  type=int,   default=3)
+    parser.add_argument('--pre_epochs',  type=int,   default=50)
     return parser.parse_args()
 
 def main():

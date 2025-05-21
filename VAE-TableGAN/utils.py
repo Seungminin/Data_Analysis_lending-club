@@ -84,7 +84,7 @@ def generate_data(model, save_dir, num_samples=10000, batch_size = 64):
         all_generated.append(fake_part)
     
     full_generated = np.vstack(all_generated)
-    output_path = os.path.join(save_dir, f"{model.dataset_name}_{model.test_id}_generated.csv")
+    output_path = os.path.join(save_dir, f"{model.dataset_name}_{model.test_id}_{model.pre_epochs}_generated.csv")
     pd.DataFrame(full_generated, columns=feature_names).to_csv(output_path, index=False)
 
     print(f"[+] Generated data saved to {output_path}")
