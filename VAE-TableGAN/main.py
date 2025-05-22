@@ -11,7 +11,7 @@ def parse_args():
     parser.add_argument('--epoch',       type=int,   default=1)
     parser.add_argument('--lr',          type=float, default=0.0002)
     parser.add_argument('--batch_size',  type=int,   default=64)
-    parser.add_argument('--input_dim',   type=int,   default=32)   # will be treated as image width/height
+    parser.add_argument('--input_dim',   type=int,   default=6)   # will be treated as image width/height/ feature수가 20개 정도이니 루트20은 4.47정도, 여유롭게 input_dim 6으로 지향.
     parser.add_argument('--dataset',     type=str,   default='loan_1')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoint')
     parser.add_argument('--sample_dir',     type=str, default='samples')

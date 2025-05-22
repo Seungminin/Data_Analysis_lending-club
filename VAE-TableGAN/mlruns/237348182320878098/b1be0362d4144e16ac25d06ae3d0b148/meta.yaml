@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/b1be0362d4144e16ac25d06ae3d0b148/artifacts
+end_time: 1747882452755
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: b1be0362d4144e16ac25d06ae3d0b148
+run_name: tasteful-cub-275
+run_uuid: b1be0362d4144e16ac25d06ae3d0b148
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747838522851
+status: 3
+tags: []
+user_id: chochoa

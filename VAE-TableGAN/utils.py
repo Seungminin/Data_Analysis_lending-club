@@ -14,7 +14,7 @@ class TabularDataset(Dataset):
         self.y = df['loan_status'].values.astype(int)
         df = df.drop(columns=['loan_status'])
 
-        scaler = MinMaxScaler(feature_range=(-1, 1))
+        scaler = MinMaxScaler(feature_range=(0, 1))
         X_scaled = scaler.fit_transform(df)
         self.X_padded = padding_duplicating(pd.DataFrame(X_scaled), input_dim * input_dim)
         self.input_dim = input_dim
