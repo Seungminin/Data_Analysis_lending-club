@@ -14,7 +14,7 @@ class TabularDataset(Dataset):
         self.y = df['loan_status'].values.astype(int)
         df = df.drop(columns=['loan_status'])
 
-        scaler = MinMaxScaler(feature_range=(0, 1))
+        scaler = MinMaxScaler(feature_range=(-1, 1))
         X_scaled = scaler.fit_transform(df)
         self.X_padded = padding_duplicating(pd.DataFrame(X_scaled), input_dim * input_dim)
         self.input_dim = input_dim
@@ -84,7 +84,7 @@ def generate_data(model, save_dir, num_samples=10000, batch_size = 64):
         all_generated.append(fake_part)
     
     full_generated = np.vstack(all_generated)
-    output_path = os.path.join(save_dir, f"{model.dataset_name}_{model.test_id}_{model.pre_epochs}_generated.csv")
+    output_path = os.path.join(save_dir, f"{model.dataset_name}_{model.test_id}_{model.pre_epochs}_generated_inputdim6.csv")
     pd.DataFrame(full_generated, columns=feature_names).to_csv(output_path, index=False)
 
     print(f"[+] Generated data saved to {output_path}")

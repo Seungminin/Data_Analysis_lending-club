@@ -27,7 +27,7 @@ def main():
 
     test_configs = {
         'test1': {
-            'lambda_vae':    0.1,
+            'lambda_vae':    1.0,
             'lambda_info':   1.0,
             'lambda_advcls': 1.0,
             'delta_mean':    0.0,

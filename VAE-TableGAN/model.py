@@ -12,52 +12,51 @@ from utils import TabularDataset
 import mlflow
 
 
-# ---------- Encoder ----------
 class Encoder(nn.Module):
-    def __init__(self, input_dim, latent_dim):
+    def __init__(self, input_dim=28*28, latent_dim=32):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, 128)
-        self.bn1 = nn.BatchNorm1d(128)
-        self.fc_mu = nn.Linear(128, latent_dim)
-        self.fc_logvar = nn.Linear(128, latent_dim)
-        self.apply(init_weights)
+        self.fc1 = nn.Linear(input_dim, 512)
+        self.bn1 = nn.BatchNorm1d(512)
+        self.fc2 = nn.Linear(512, 256)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.fc_mu = nn.Linear(256, latent_dim)
+        self.fc_logvar = nn.Linear(256, latent_dim)
 
     def forward(self, x):
         h = F.relu(self.bn1(self.fc1(x)))
+        h = F.relu(self.bn2(self.fc2(h)))
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
         z = reparameterize(mu, logvar)
         return z, mu, logvar
 
-# ---------- Generator (for input_dim = 6) ----------
+
+# Generator for 28x28 output
 class Generator(nn.Module):
     def __init__(self, z_dim=32, feature_maps=64, output_channels=1):
         super().__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(z_dim, feature_maps * 3 * 3),
-            nn.BatchNorm1d(feature_maps * 3 * 3),
-            nn.ReLU(True)
-        )
+        self.fc = nn.Linear(z_dim, feature_maps * 7 * 7)
         self.deconv = nn.Sequential(
-            nn.ConvTranspose2d(feature_maps, feature_maps // 2, 3, stride=2),
-            nn.BatchNorm2d(feature_maps // 2),
-            nn.ReLU(True),
-            nn.Conv2d(feature_maps // 2, output_channels, kernel_size=2),
-            nn.Sigmoid()
+            nn.BatchNorm2d(feature_maps), nn.ReLU(True),
+            nn.ConvTranspose2d(feature_maps, feature_maps // 2, 4, 2, 1),  # 14x14
+            nn.BatchNorm2d(feature_maps // 2), nn.ReLU(True),
+            nn.ConvTranspose2d(feature_maps // 2, output_channels, 4, 2, 1),  # 28x28
+            nn.Tanh()
         )
 
     def forward(self, z):
-        x = self.fc(z).view(z.size(0), -1, 3, 3)
+        x = self.fc(z).view(z.size(0), -1, 7, 7)
         return self.deconv(x)
 
-# ---------- Discriminator (for input_dim = 6) ----------
+
 class Discriminator(nn.Module):
-    def __init__(self, input_channels=1, feature_maps=32):
+    def __init__(self, input_channels=1, feature_maps=64):
         super().__init__()
         self.feature_extractor = nn.Sequential(
-            nn.Conv2d(input_channels, feature_maps, 3, stride=1),
+            nn.Conv2d(input_channels, feature_maps, 4, 2, 1),  # 14x14
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(feature_maps, feature_maps * 2, 2, stride=1),
+            nn.Conv2d(feature_maps, feature_maps * 2, 4, 2, 1),  # 7x7
+            nn.BatchNorm2d(feature_maps * 2),
             nn.LeakyReLU(0.2, inplace=True),
             nn.AdaptiveAvgPool2d((1, 1))
         )
@@ -68,27 +67,26 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, x, return_features=False):
-        features = self.feature_extractor(x)
-        score = self.classifier(features)
+        feat = self.feature_extractor(x)
+        score = self.classifier(feat)
         if return_features:
-            return score, features.view(x.size(0), -1)
+            return score, feat.view(x.size(0), -1)
         return score
 
-# ---------- Classifier (for input_dim = 6) ----------
 class Classifier(nn.Module):
-    def __init__(self, input_channels=1, feature_maps=32, num_classes=2):
+    def __init__(self, input_channels=1, feature_maps=64, num_classes=2):
         super().__init__()
-        self.main = nn.Sequential(
-            nn.Conv2d(input_channels, feature_maps, 3, stride=1),
+        self.features = nn.Sequential(
+            nn.Conv2d(input_channels, feature_maps, 4, 2, 1),  # 14x14
             nn.ReLU(True),
-            nn.Conv2d(feature_maps, feature_maps * 2, 2, stride=1),
+            nn.Conv2d(feature_maps, feature_maps * 2, 4, 2, 1),  # 7x7
             nn.ReLU(True),
             nn.AdaptiveAvgPool2d((1, 1))
         )
         self.classifier = nn.Linear(feature_maps * 2, num_classes)
 
     def forward(self, x):
-        x = self.main(x).view(x.size(0), -1)
+        x = self.features(x).view(x.size(0), -1)
         return self.classifier(x)
 
 
@@ -141,7 +139,7 @@ class VAETableGan(nn.Module):
         # optimizers
         self.opt_enc  = torch.optim.Adam(self.encoder.parameters(),       lr=lr)
         self.opt_gen  = torch.optim.Adam(list(self.generator.parameters()),     lr=lr)
-        self.opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=lr)
+        self.opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=lr*0.1)
         self.opt_cls  = torch.optim.Adam(self.classifier.parameters(),    lr=lr)
 
         self.prev_gmean = None
@@ -221,8 +219,6 @@ class VAETableGan(nn.Module):
 
         for param in self.encoder.parameters():
             param.requires_grad = False
-
-        self.opt_gen = torch.optim.Adam(self.generator.parameters(), lr=self.opt_gen.param_groups[0]['lr'])
 
         for epoch in tqdm(range(self.epochs), desc = "Fine Tuning"):
             g_totals = {'vae':0, 'info':0, 'advcls':0}
