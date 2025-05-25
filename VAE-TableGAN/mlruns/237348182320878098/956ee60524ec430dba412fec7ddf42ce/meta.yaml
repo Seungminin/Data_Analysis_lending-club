@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/956ee60524ec430dba412fec7ddf42ce/artifacts
+end_time: 1748005360743
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: 956ee60524ec430dba412fec7ddf42ce
+run_name: popular-grub-966
+run_uuid: 956ee60524ec430dba412fec7ddf42ce
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1748005358221
+status: 3
+tags: []
+user_id: chochoa

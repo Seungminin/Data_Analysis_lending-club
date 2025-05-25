@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/0c2888b6b33442d9aaf93b2b7316529f/artifacts
+end_time: 1748131597332
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: 0c2888b6b33442d9aaf93b2b7316529f
+run_name: clumsy-lamb-716
+run_uuid: 0c2888b6b33442d9aaf93b2b7316529f
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1748014614861
+status: 3
+tags: []
+user_id: chochoa

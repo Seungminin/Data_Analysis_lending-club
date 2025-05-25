@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/329c3c9bef2a416d8729e9df0c2792c1/artifacts
+end_time: 1748005237545
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: 329c3c9bef2a416d8729e9df0c2792c1
+run_name: painted-turtle-698
+run_uuid: 329c3c9bef2a416d8729e9df0c2792c1
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1748005234353
+status: 3
+tags: []
+user_id: chochoa

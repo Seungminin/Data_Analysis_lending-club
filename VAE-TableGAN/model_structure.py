@@ -93,3 +93,76 @@ class Classifier(nn.Module):
     def forward(self, x):
         x = self.main(x).view(x.size(0), -1)
         return self.classifier(x)
+    
+
+def fine_tune(self, train_loader):
+
+        for param in self.encoder.parameters():
+            param.requires_grad = False
+
+        self.opt_gen = torch.optim.Adam(self.generator.parameters(), lr=self.opt_gen.param_groups[0]['lr'])
+
+        for epoch in tqdm(range(self.epochs), desc = "Fine Tuning"):
+            g_totals = {'vae':0, 'info':0, 'advcls':0}
+            d_total = 0
+
+            for x, y in tqdm(train_loader, desc=f"Fine-tune Epoch {epoch+1}/{self.epochs}"):
+                x, y = x.to(self.device), y.to(self.device)
+                flat = x.view(x.size(0), -1)
+                with torch.no_grad(): 
+                    z, mu, logvar = self.encoder(flat)
+
+                x_hat = self.generator(z)
+
+                rec = F.mse_loss(x_hat, x)
+                kl  = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+                vae = rec + kl
+
+                advcls, d_loss, adv, cls = self.compute_gan_losses(x, x_hat, y)
+
+                real_score, real_feat = self.discriminator(x, return_features=True)
+                fake_score, fake_feat = self.discriminator(x_hat, return_features=True)
+                info = self.compute_info_loss(real_feat, fake_feat)
+
+                g_loss = (self.lambda_vae * vae +
+                          self.lambda_info * info +
+                          self.lambda_advcls * advcls)
+
+                # D update
+                self.opt_disc.zero_grad()
+                d_loss.backward()
+                self.opt_disc.step()
+
+                # G update twice
+                for _ in range(2):
+                    self.opt_gen.zero_grad()
+
+                    x_hat = self.generator(z)
+                    rec = F.mse_loss(x_hat, x)
+                    kl  = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+                    vae = rec + kl
+
+                    advcls, _, _, _ = self.compute_gan_losses(x, x_hat, y)
+                    _, real_feat = self.discriminator(x, return_features=True)
+                    _, fake_feat = self.discriminator(x_hat, return_features=True)
+                    info = self.compute_info_loss(real_feat, fake_feat)
+
+                    g_loss = (self.lambda_vae * vae +
+                            self.lambda_info * info +
+                            self.lambda_advcls * advcls)
+
+                    g_loss.backward()
+                    self.opt_gen.step()
+                
+                # C update
+                self.opt_cls.zero_grad()
+                real_logits = self.classifier(x)
+                loss_rcls  = F.cross_entropy(real_logits, y)
+                loss_rcls.backward()
+                self.opt_cls.step()
+
+                g_totals['vae']   += vae.item()
+                g_totals['info']  += info.item()
+                g_totals['advcls']+= advcls.item()
+                d_total           += d_loss.item()
+

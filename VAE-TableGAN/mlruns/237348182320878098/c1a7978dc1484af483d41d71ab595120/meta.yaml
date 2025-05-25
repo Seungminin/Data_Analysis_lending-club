@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/c1a7978dc1484af483d41d71ab595120/artifacts
+end_time: 1748005095892
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: c1a7978dc1484af483d41d71ab595120
+run_name: respected-grouse-205
+run_uuid: c1a7978dc1484af483d41d71ab595120
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1748005093687
+status: 3
+tags: []
+user_id: chochoa

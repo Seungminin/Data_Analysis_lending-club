@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/ad3c0edac1b24401a5a63f3658c6878b/artifacts
+end_time: 1748003744274
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: ad3c0edac1b24401a5a63f3658c6878b
+run_name: receptive-trout-240
+run_uuid: ad3c0edac1b24401a5a63f3658c6878b
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1748003741785
+status: 3
+tags: []
+user_id: chochoa

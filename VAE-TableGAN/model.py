@@ -11,16 +11,15 @@ from ops import reparameterize, init_weights
 from utils import TabularDataset
 import mlflow
 
-
 class Encoder(nn.Module):
-    def __init__(self, input_dim=28*28, latent_dim=32):
+    def __init__(self, input_dim=32*32, latent_dim=32):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, 512)
-        self.bn1 = nn.BatchNorm1d(512)
-        self.fc2 = nn.Linear(512, 256)
-        self.bn2 = nn.BatchNorm1d(256)
-        self.fc_mu = nn.Linear(256, latent_dim)
-        self.fc_logvar = nn.Linear(256, latent_dim)
+        self.fc1 = nn.Linear(input_dim, 2048)
+        self.bn1 = nn.BatchNorm1d(2048)
+        self.fc2 = nn.Linear(2048, 1024)
+        self.bn2 = nn.BatchNorm1d(1024)
+        self.fc_mu = nn.Linear(1024, latent_dim)
+        self.fc_logvar = nn.Linear(1024, latent_dim)
 
     def forward(self, x):
         h = F.relu(self.bn1(self.fc1(x)))
@@ -30,65 +29,72 @@ class Encoder(nn.Module):
         z = reparameterize(mu, logvar)
         return z, mu, logvar
 
-
-# Generator for 28x28 output
 class Generator(nn.Module):
-    def __init__(self, z_dim=32, feature_maps=64, output_channels=1):
+    def __init__(self, z_dim=32, output_shape=(1, 64, 64)):
         super().__init__()
-        self.fc = nn.Linear(z_dim, feature_maps * 7 * 7)
+        self.init_size = output_shape[1] // 4
+        self.fc = nn.Linear(z_dim, 256 * self.init_size * self.init_size)
         self.deconv = nn.Sequential(
-            nn.BatchNorm2d(feature_maps), nn.ReLU(True),
-            nn.ConvTranspose2d(feature_maps, feature_maps // 2, 4, 2, 1),  # 14x14
-            nn.BatchNorm2d(feature_maps // 2), nn.ReLU(True),
-            nn.ConvTranspose2d(feature_maps // 2, output_channels, 4, 2, 1),  # 28x28
+            nn.BatchNorm2d(256),
+            nn.ReLU(),  # Remove inplace=True
+            nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),  # Remove inplace=True
+            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),  # Remove inplace=True
+            nn.Conv2d(64, output_shape[0], kernel_size=3, stride=1, padding=1),
             nn.Tanh()
         )
 
     def forward(self, z):
-        x = self.fc(z).view(z.size(0), -1, 7, 7)
+        x = self.fc(z).view(z.size(0), 256, self.init_size, self.init_size)
         return self.deconv(x)
 
-
 class Discriminator(nn.Module):
-    def __init__(self, input_channels=1, feature_maps=64):
+    def __init__(self, input_channels=1):
         super().__init__()
-        self.feature_extractor = nn.Sequential(
-            nn.Conv2d(input_channels, feature_maps, 4, 2, 1),  # 14x14
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(feature_maps, feature_maps * 2, 4, 2, 1),  # 7x7
-            nn.BatchNorm2d(feature_maps * 2),
-            nn.LeakyReLU(0.2, inplace=True),
+        self.conv = nn.Sequential(
+            nn.Conv2d(input_channels, 64, 4, stride=2, padding=1),
+            nn.LeakyReLU(0.2),  # Remove inplace=True
+            nn.Conv2d(64, 128, 4, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2),  # Remove inplace=True
+            nn.Conv2d(128, 256, 4, stride=2, padding=1),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2),  # Remove inplace=True
             nn.AdaptiveAvgPool2d((1, 1))
         )
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(feature_maps * 2, 1),
+            nn.Linear(256, 1),
             nn.Sigmoid()
         )
 
     def forward(self, x, return_features=False):
-        feat = self.feature_extractor(x)
-        score = self.classifier(feat)
+        feat = self.conv(x)
+        out = self.classifier(feat)
         if return_features:
-            return score, feat.view(x.size(0), -1)
-        return score
+            return out, feat.view(x.size(0), -1)
+        return out
 
 class Classifier(nn.Module):
-    def __init__(self, input_channels=1, feature_maps=64, num_classes=2):
+    def __init__(self, input_channels=1, num_classes=2):
         super().__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(input_channels, feature_maps, 4, 2, 1),  # 14x14
-            nn.ReLU(True),
-            nn.Conv2d(feature_maps, feature_maps * 2, 4, 2, 1),  # 7x7
-            nn.ReLU(True),
+        self.conv = nn.Sequential(
+            nn.Conv2d(input_channels, 64, 4, stride=2, padding=1),
+            nn.ReLU(),  # Remove inplace=True
+            nn.Conv2d(64, 128, 4, stride=2, padding=1),
+            nn.ReLU(),  # Remove inplace=True
+            nn.Conv2d(128, 256, 4, stride=2, padding=1),
+            nn.ReLU(),  # Remove inplace=True
             nn.AdaptiveAvgPool2d((1, 1))
         )
-        self.classifier = nn.Linear(feature_maps * 2, num_classes)
+        self.fc = nn.Linear(256, num_classes)
 
     def forward(self, x):
-        x = self.features(x).view(x.size(0), -1)
-        return self.classifier(x)
-
+        feat = self.conv(x)
+        return self.fc(feat.view(x.size(0), -1))
 
 class VAETableGan(nn.Module):
     def __init__(self,
@@ -191,121 +197,126 @@ class VAETableGan(nn.Module):
         self.load_state_dict(torch.load(path, map_location=self.device))
         self.eval()
 
-    def pre_train(self, train_loader):
-        for epoch in range(self.pre_epochs):
-            rec_total, kl_total = 0, 0
-            for x, _ in tqdm(train_loader, desc=f"VAE Pre-train Epoch {epoch+1}/{self.pre_epochs}"):
-                x = x.to(self.device)
-                flat = x.view(x.size(0), -1)
-                z, mu, logvar = self.encoder(flat)
-                x_hat = self.generator(z)
-                rec = F.mse_loss(x_hat, x)
-                kl  = (-0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp()))
-                loss = rec + kl
-
-                self.opt_enc.zero_grad(); self.opt_gen.zero_grad()
-                loss.backward()
-                self.opt_enc.step(); self.opt_gen.step()
-
-                rec_total += rec.item(); kl_total += kl.item()
-
-            wandb.log({
-                "pre_rec_loss": rec_total/len(train_loader),
-                "pre_kl_loss":  kl_total/len(train_loader)
-            }, step=self.global_step)
-            self.global_step += 1
-
-    def fine_tune(self, train_loader):
-
-        for param in self.encoder.parameters():
-            param.requires_grad = False
-
-        for epoch in tqdm(range(self.epochs), desc = "Fine Tuning"):
-            g_totals = {'vae':0, 'info':0, 'advcls':0}
-            d_total = 0
-
-            for x, y in tqdm(train_loader, desc=f"Fine-tune Epoch {epoch+1}/{self.epochs}"):
-                x, y = x.to(self.device), y.to(self.device)
-                flat = x.view(x.size(0), -1)
-                with torch.no_grad(): 
-                    z, mu, logvar = self.encoder(flat)
-
-                x_hat = self.generator(z)
-
-                rec = F.mse_loss(x_hat, x)
-                kl  = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-                vae = rec + kl
-
-                advcls, d_loss, adv, cls = self.compute_gan_losses(x, x_hat, y)
-
-                real_score, real_feat = self.discriminator(x, return_features=True)
-                fake_score, fake_feat = self.discriminator(x_hat, return_features=True)
-                info = self.compute_info_loss(real_feat, fake_feat)
-
-                g_loss = (self.lambda_vae * vae +
-                          self.lambda_info * info +
-                          self.lambda_advcls * advcls)
-
-                # D update
-                self.opt_disc.zero_grad()
-                d_loss.backward()
-                self.opt_disc.step()
-
-                # G update twice
-                for _ in range(2):
-                    self.opt_gen.zero_grad()
-
-                    x_hat = self.generator(z)
-                    rec = F.mse_loss(x_hat, x)
-                    kl  = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-                    vae = rec + kl
-
-                    advcls, _, _, _ = self.compute_gan_losses(x, x_hat, y)
-                    _, real_feat = self.discriminator(x, return_features=True)
-                    _, fake_feat = self.discriminator(x_hat, return_features=True)
-                    info = self.compute_info_loss(real_feat, fake_feat)
-
-                    g_loss = (self.lambda_vae * vae +
-                            self.lambda_info * info +
-                            self.lambda_advcls * advcls)
-
-                    g_loss.backward()
-                    self.opt_gen.step()
-                
-                # C update
-                self.opt_cls.zero_grad()
-                real_logits = self.classifier(x)
-                loss_rcls  = F.cross_entropy(real_logits, y)
-                loss_rcls.backward()
-                self.opt_cls.step() 
-
-                g_totals['vae']   += vae.item()
-                g_totals['info']  += info.item()
-                g_totals['advcls']+= advcls.item()
-                d_total           += d_loss.item()
-
-
-            wandb.log({
-                "ft_vae_loss":   g_totals['vae']/len(train_loader),
-                "ft_info_loss":  g_totals['info']/len(train_loader),
-                "ft_advcls_loss":g_totals['advcls']/len(train_loader),
-                "ft_d_loss":     d_total/len(train_loader)
-            }, step=self.global_step)
-            self.global_step += 1
     def train_model(self, args):
         ds = TabularDataset(f"dataset/{self.dataset_name}/{self.dataset_name}.csv",
-                             int((self.input_dim)**0.5), self.attrib_num, self.label_col)
+                            int((self.input_dim)**0.5), self.attrib_num, self.label_col)
         loader = DataLoader(ds, batch_size=self.batch_size, shuffle=True)
 
-        # start MLflow / W&B
         mlflow.set_experiment("VAE-TableGAN")
         mlflow.start_run()
         wandb.init(project="vae-tablegan", name=self.test_id, config=vars(args))
 
-        self.pre_train(loader)
-        self.fine_tune(loader)
+        for epoch in tqdm(range(self.epochs), desc="One-Stage Training"):
+            g_totals = {'vae': 0, 'info': 0, 'advcls': 0}
+            d_total = 0
 
-        # save final
+            torch.autograd.set_detect_anomaly(True)
+            
+            for x, y in tqdm(loader, desc=f"Epoch {epoch + 1}/{self.epochs}"):
+                x, y = x.to(self.device), y.to(self.device)
+                flat = x.view(x.size(0), -1)
+
+                # === Update Discriminator ===
+                self.discriminator.train()
+                self.opt_disc.zero_grad()
+                
+                z, mu, logvar = self.encoder(flat)
+                x_hat = self.generator(z)
+                
+                real_score = self.discriminator(x)
+                fake_score = self.discriminator(x_hat.detach())
+                d_loss = (F.binary_cross_entropy(real_score, torch.ones_like(real_score)) +
+                         F.binary_cross_entropy(fake_score, torch.zeros_like(fake_score)))
+                
+                d_loss.backward()
+                self.opt_disc.step()
+
+                # === Update Generator and Encoder ===
+                self.generator.train()
+                self.encoder.train()
+                self.opt_gen.zero_grad()
+                self.opt_enc.zero_grad()
+
+                # Fresh forward pass
+                z, mu, logvar = self.encoder(flat)
+                x_hat = self.generator(z)
+
+                # VAE losses
+                rec = F.mse_loss(x_hat, x)
+                kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+                vae_loss = rec + kl
+
+                # GAN losses
+                fake_score = self.discriminator(x_hat)
+                adv_loss = F.binary_cross_entropy(fake_score, torch.ones_like(fake_score))
+                
+                # Classification losses
+                real_logits = self.classifier(x)
+                fake_logits = self.classifier(x_hat)
+                cls_loss = F.cross_entropy(real_logits, y) + F.cross_entropy(fake_logits, y)
+                
+                # Info loss
+                _, real_feat = self.discriminator(x, return_features=True)
+                _, fake_feat = self.discriminator(x_hat, return_features=True)
+                info_loss = self.compute_info_loss(real_feat, fake_feat)
+
+                # Combined generator loss
+                g_loss = (self.lambda_vae * vae_loss +
+                         self.lambda_info * info_loss +
+                         self.lambda_advcls * (adv_loss + cls_loss))
+
+                g_loss.backward()
+                self.opt_gen.step()
+                self.opt_enc.step()
+
+                # === Second Generator Update ===
+                self.opt_gen.zero_grad()
+                
+                # Use detached z for second update
+                with torch.no_grad():
+                    z_detached, _, _ = self.encoder(flat)
+                
+                x_hat_2 = self.generator(z_detached)
+                rec_2 = F.mse_loss(x_hat_2, x)
+                fake_score_2 = self.discriminator(x_hat_2)
+                adv_loss_2 = F.binary_cross_entropy(fake_score_2, torch.ones_like(fake_score_2))
+                
+                fake_logits_2 = self.classifier(x_hat_2)
+                cls_loss_2 = F.cross_entropy(fake_logits_2, y)
+                
+                _, fake_feat_2 = self.discriminator(x_hat_2, return_features=True)
+                info_loss_2 = self.compute_info_loss(real_feat.detach(), fake_feat_2)
+
+                g_loss_2 = (self.lambda_vae * rec_2 +
+                           self.lambda_info * info_loss_2 +
+                           self.lambda_advcls * (adv_loss_2 + cls_loss_2))
+
+                g_loss_2.backward()
+                self.opt_gen.step()
+
+                # === Update Classifier ===
+                self.classifier.train()
+                self.opt_cls.zero_grad()
+                real_logits_cls = self.classifier(x)
+                cls_real_loss = F.cross_entropy(real_logits_cls, y)
+                cls_real_loss.backward()
+                self.opt_cls.step()
+
+                # === Accumulate loss for logging ===
+                g_totals['vae'] += vae_loss.item()
+                g_totals['info'] += info_loss.item()
+                g_totals['advcls'] += (adv_loss + cls_loss).item()
+                d_total += d_loss.item()
+
+            wandb.log({
+                "vae_loss": g_totals['vae'] / len(loader),
+                "info_loss": g_totals['info'] / len(loader),
+                "advcls_loss": g_totals['advcls'] / len(loader),
+                "d_loss": d_total / len(loader)
+            }, step=self.global_step)
+
+            self.global_step += 1
+
         self.save()
         mlflow.end_run()
         wandb.finish()
