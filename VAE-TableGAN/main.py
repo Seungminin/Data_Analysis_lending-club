@@ -8,7 +8,7 @@ from utils import pp, generate_data, show_all_parameters
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epoch',       type=int,   default=1)
+    parser.add_argument('--weight_epochs',       type=int,   default=50)
     parser.add_argument('--lr',          type=float, default=0.0002)
     parser.add_argument('--batch_size',  type=int,   default=64)
     parser.add_argument('--input_dim',   type=int,   default=6)   # will be treated as image width/height/ feature수가 20개 정도이니 루트20은 4.47정도, 여유롭게 input_dim 6으로 지향.
@@ -76,7 +76,7 @@ def main():
         device        = device,
         lr            = args.lr,
         pre_epochs    = args.pre_epochs,
-        epochs        = args.epoch,
+        weight_epochs = args.weight_epochs,
         lambda_vae    = args.lambda_vae,
         lambda_info   = args.lambda_info,
         lambda_advcls = args.lambda_advcls

@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/VAE-TableGAN/mlruns/237348182320878098/e1e7486a35d5485c88a9ae4e62777ed3/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '237348182320878098'
+lifecycle_stage: active
+run_id: e1e7486a35d5485c88a9ae4e62777ed3
+run_name: righteous-gull-533
+run_uuid: e1e7486a35d5485c88a9ae4e62777ed3
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1748186459869
+status: 1
+tags: []
+user_id: chochoa

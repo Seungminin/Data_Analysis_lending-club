@@ -174,10 +174,10 @@ class VAETableGan(nn.Module):
             self.prev_gmean = mean_r.detach()
             self.prev_gvar  = var_r.detach()
 
-        gmean_r = 0.99*self.prev_gmean + 0.01*mean_r
-        gmean_f = 0.99*self.prev_gmean + 0.01*mean_f
-        gvar_r  = 0.99*self.prev_gvar  + 0.01*var_r
-        gvar_f  = 0.99*self.prev_gvar  + 0.01*var_f
+        gmean_r = 0.99*self.prev_gmean + 0.1*mean_r
+        gmean_f = 0.99*self.prev_gmean + 0.1*mean_f
+        gvar_r  = 0.99*self.prev_gvar  + 0.1*var_r
+        gvar_f  = 0.99*self.prev_gvar  + 0.1*var_f
 
         info_loss = (
             torch.clamp((gmean_r - gmean_f).abs() - self.delta_mean, min=0).sum() +
@@ -207,6 +207,10 @@ class VAETableGan(nn.Module):
         wandb.init(project="vae-tablegan", name=self.test_id, config=vars(args))
 
         for epoch in tqdm(range(self.epochs), desc="One-Stage Training"):
+            # === Weight Annealing ===
+            lambda_info = min(1.0, self.lambda_info * (epoch + 1) / 20)
+            lambda_advcls = min(1.0, self.lambda_advcls * (epoch + 1) / 20)
+
             g_totals = {'vae': 0, 'info': 0, 'advcls': 0}
             d_total = 0
 
@@ -262,8 +266,8 @@ class VAETableGan(nn.Module):
 
                 # Combined generator loss
                 g_loss = (self.lambda_vae * vae_loss +
-                         self.lambda_info * info_loss +
-                         self.lambda_advcls * (adv_loss + cls_loss))
+                         lambda_info * info_loss +
+                         lambda_advcls * (adv_loss + cls_loss))
 
                 g_loss.backward()
                 self.opt_gen.step()
@@ -288,8 +292,8 @@ class VAETableGan(nn.Module):
                 info_loss_2 = self.compute_info_loss(real_feat.detach(), fake_feat_2)
 
                 g_loss_2 = (self.lambda_vae * rec_2 +
-                           self.lambda_info * info_loss_2 +
-                           self.lambda_advcls * (adv_loss_2 + cls_loss_2))
+                           lambda_info * info_loss_2 +
+                           lambda_advcls * (adv_loss_2 + cls_loss_2))
 
                 g_loss_2.backward()
                 self.opt_gen.step()

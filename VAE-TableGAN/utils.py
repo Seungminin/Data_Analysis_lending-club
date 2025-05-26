@@ -3,6 +3,10 @@ import torch
 import os
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt 
+
+from sklearn.manifold import TSNE
+from sklearn.decomposition import PCA
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from sklearn.preprocessing import MinMaxScaler
@@ -105,3 +109,39 @@ def reshape(data, dim=None):
         return data.values.reshape(data.shape[0], dim, dim)
     else:
         return data.values.reshape(data.shape[0], -1)
+    
+
+def visualize_latent_vectors(encoder, dataloader, device, method='tsne'):
+    encoder.eval()
+    all_z, all_labels = [], []
+
+    with torch.no_grad():
+        for x, y in dataloader:
+            x = x.to(device)
+            z, _, _ = encoder(x)
+            all_z.append(z.cpu())
+            all_labels.append(y.cpu())
+
+    all_z = torch.cat(all_z).numpy()
+    all_labels = torch.cat(all_labels).numpy()
+
+    # 2D Reduction
+    if method == 'tsne':
+        reducer = TSNE(n_components=2, random_state=42)
+    elif method == 'pca':
+        reducer = PCA(n_components=2)
+    else:
+        raise ValueError("method should be 'tsne' or 'pca'")
+
+    z_2d = reducer.fit_transform(all_z)
+
+    # Plot
+    plt.figure(figsize=(8, 6))
+    scatter = plt.scatter(z_2d[:, 0], z_2d[:, 1], c=all_labels, cmap='tab10', alpha=0.7)
+    plt.colorbar(scatter, label="Class Label")
+    plt.title(f"Latent Space Visualization ({method.upper()})")
+    plt.xlabel("Dim 1")
+    plt.ylabel("Dim 2")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
