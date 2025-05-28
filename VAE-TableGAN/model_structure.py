@@ -294,7 +294,7 @@ class VAETableGan(nn.Module):
                  device,
                  lr,
                  pre_epochs,
-                 weight_epochs,
+                 epochs,
                  lambda_vae: float = 1.0,
                  lambda_info: float = 1.0,
                  lambda_advcls: float = 1.0):
@@ -312,7 +312,7 @@ class VAETableGan(nn.Module):
         self.device         = device
         self.input_dim      = input_dim * input_dim
         self.pre_epochs     = pre_epochs
-        self.weight_epochs  = weight_epochs
+        self.epochs         = epochs
         self.global_step    = 0
         self.lambda_vae     = lambda_vae
         self.lambda_info    = lambda_info

@@ -12,37 +12,49 @@ from utils import TabularDataset
 import mlflow
 
 class Encoder(nn.Module):
-    def __init__(self, input_dim=32*32, latent_dim=32):
+    def __init__(self, input_shape=(1, 64, 64), latent_dim=64):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, 2048)
-        self.bn1 = nn.BatchNorm1d(2048)
-        self.fc2 = nn.Linear(2048, 1024)
-        self.bn2 = nn.BatchNorm1d(1024)
-        self.fc_mu = nn.Linear(1024, latent_dim)
-        self.fc_logvar = nn.Linear(1024, latent_dim)
+        self.latent_dim = latent_dim
+        self.conv = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=4, stride=2, padding=1),  # 64 -> 32
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1), # 32 -> 16
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1), # 16 -> 8
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1), # 8 -> 4
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+        )
+        self.flatten = nn.Flatten()
+        self.fc_mu = nn.Linear(256 * 4 * 4, latent_dim)
+        self.fc_logvar = nn.Linear(256 * 4 * 4, latent_dim)
 
     def forward(self, x):
-        h = F.relu(self.bn1(self.fc1(x)))
-        h = F.relu(self.bn2(self.fc2(h)))
+        h = self.conv(x)
+        h = self.flatten(h)
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
         z = reparameterize(mu, logvar)
         return z, mu, logvar
 
 class Generator(nn.Module):
-    def __init__(self, z_dim=32, output_shape=(1, 64, 64)):
+    def __init__(self, z_dim=64, output_shape=(1, 64, 64)):
         super().__init__()
         self.init_size = output_shape[1] // 4
         self.fc = nn.Linear(z_dim, 256 * self.init_size * self.init_size)
         self.deconv = nn.Sequential(
             nn.BatchNorm2d(256),
-            nn.ReLU(),  # Remove inplace=True
+            nn.ReLU(),  
             nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),
             nn.BatchNorm2d(128),
-            nn.ReLU(),  # Remove inplace=True
+            nn.ReLU(),  
             nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU(),  # Remove inplace=True
+            nn.ReLU(),  
             nn.Conv2d(64, output_shape[0], kernel_size=3, stride=1, padding=1),
             nn.Tanh()
         )
@@ -117,7 +129,7 @@ class VAETableGan(nn.Module):
                  lambda_info: float = 1.0,
                  lambda_advcls: float = 1.0):
         super().__init__()
-        self.latent_dim     = 32
+        self.latent_dim     = 64
         self.batch_size     = batch_size
         self.delta_mean     = delta_mean
         self.delta_var      = delta_var
@@ -135,6 +147,7 @@ class VAETableGan(nn.Module):
         self.lambda_vae     = lambda_vae
         self.lambda_info    = lambda_info
         self.lambda_advcls  = lambda_advcls
+        self.base_lr        = lr
 
         # modules
         self.encoder       = Encoder(self.input_dim, self.latent_dim).to(device)
@@ -189,11 +202,11 @@ class VAETableGan(nn.Module):
 
     def save(self):
         os.makedirs(self.checkpoint_dir, exist_ok=True)
-        path = os.path.join(self.checkpoint_dir, f"{self.dataset_name}_{self.test_id}_{self.pre_epochs}_model.pt")
+        path = os.path.join(self.checkpoint_dir, f"{self.dataset_name}_{self.test_id}_model_based_CNN.pt")
         torch.save(self.state_dict(), path)
 
     def load(self):
-        path = os.path.join(self.checkpoint_dir, f"{self.dataset_name}_{self.test_id}_{self.pre_epochs}_model.pt")
+        path = os.path.join(self.checkpoint_dir, f"{self.dataset_name}_{self.test_id}_model_based_CNN.pt")
         self.load_state_dict(torch.load(path, map_location=self.device))
         self.eval()
 
@@ -207,9 +220,17 @@ class VAETableGan(nn.Module):
         wandb.init(project="vae-tablegan", name=self.test_id, config=vars(args))
 
         for epoch in tqdm(range(self.epochs), desc="One-Stage Training"):
-            # === Weight Annealing ===
-            lambda_info = min(1.0, self.lambda_info * (epoch + 1) / 20)
-            lambda_advcls = min(1.0, self.lambda_advcls * (epoch + 1) / 20)
+            if epoch < self.pre_epochs:
+                lambda_info = 0.0
+                lambda_advcls = 0.0
+                lambda_vae = self.lambda_vae
+            else:
+                lambda_info = self.lambda_info
+                lambda_advcls = self.lambda_advcls
+                lambda_vae = self.lambda_vae*0.1
+
+                for param_group in self.opt_enc.param_groups:
+                    param_group['lr'] = self.base_lr * 0.001
 
             g_totals = {'vae': 0, 'info': 0, 'advcls': 0}
             d_total = 0
@@ -218,7 +239,7 @@ class VAETableGan(nn.Module):
             
             for x, y in tqdm(loader, desc=f"Epoch {epoch + 1}/{self.epochs}"):
                 x, y = x.to(self.device), y.to(self.device)
-                flat = x.view(x.size(0), -1)
+                flat = x.view(x.size(0), 1, 64, 64)
 
                 # === Update Discriminator ===
                 self.discriminator.train()
@@ -265,7 +286,7 @@ class VAETableGan(nn.Module):
                 info_loss = self.compute_info_loss(real_feat, fake_feat)
 
                 # Combined generator loss
-                g_loss = (self.lambda_vae * vae_loss +
+                g_loss = (lambda_vae * vae_loss +
                          lambda_info * info_loss +
                          lambda_advcls * (adv_loss + cls_loss))
 
@@ -291,7 +312,7 @@ class VAETableGan(nn.Module):
                 _, fake_feat_2 = self.discriminator(x_hat_2, return_features=True)
                 info_loss_2 = self.compute_info_loss(real_feat.detach(), fake_feat_2)
 
-                g_loss_2 = (self.lambda_vae * rec_2 +
+                g_loss_2 = (lambda_vae * rec_2 +
                            lambda_info * info_loss_2 +
                            lambda_advcls * (adv_loss_2 + cls_loss_2))
 
