@@ -387,7 +387,11 @@ def generate_data(sess, model, config, option, num_samples=1000000):
         for idx in range(total_batches):
             print(f"📦 Generating batch {idx + 1}/{total_batches}")
             samples_to_generate = batch_size if idx < total_batches - 1 else input_size - (idx * batch_size)
-
+            
+            if samples_to_generate < batch_size:
+                print(f"⚠️ Skipping final incomplete batch: {samples_to_generate} samples (needed: {batch_size})")
+                continue
+            
             z_sample = np.random.uniform(-1, 1, size=(samples_to_generate, model.z_dim))
             zero_labels = model.zero_one_ratio
             y = np.ones((samples_to_generate, 1))

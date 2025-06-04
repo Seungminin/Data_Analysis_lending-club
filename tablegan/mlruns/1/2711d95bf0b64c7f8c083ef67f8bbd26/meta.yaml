@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/GCU/Lending_club/Data_Analysis_lending-club/tablegan/mlruns/1/2711d95bf0b64c7f8c083ef67f8bbd26/artifacts
+end_time: 1748940291218
+entry_point_name: ''
+experiment_id: '1'
+lifecycle_stage: active
+name: ''
+run_id: 2711d95bf0b64c7f8c083ef67f8bbd26
+run_uuid: 2711d95bf0b64c7f8c083ef67f8bbd26
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1748875517575
+status: 3
+tags: []
+user_id: chochoa
