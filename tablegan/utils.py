@@ -417,7 +417,7 @@ def generate_data(sess, model, config, option, num_samples=1000000):
         print(f"✅ Fake Data shape: {fake_data.shape}")
 
         # ✅ 원본 데이터 로드 및 Label Encoding
-        origin_data_path = "C:/Users/GCU/Lending_club/Data_Analysis_lending-club/tablegan/data/categorical/categorical_original"
+        origin_data_path = "C:/Users/GCU/Lending_club/Data_Analysis_lending-club/tablegan/data/smotified/smotified_original"
         if os.path.exists(origin_data_path + ".csv"):
             print(f"📥 Loading CSV input file: {origin_data_path}.csv")
             origin_data = pd.read_csv(origin_data_path + ".csv", sep=',')
