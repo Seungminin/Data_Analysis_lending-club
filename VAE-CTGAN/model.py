@@ -1,517 +1,215 @@
 import os
-import wandb
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from sklearn.preprocessing import MinMaxScaler
-from tqdm import tqdm
+import torch.optim as optim
 
-from ops import reparameterize, init_weights
-from utils import TabularDataset
-import mlflow
+from ops import reparameterize
+from ctgan.data_transformer import DataTransformer
+from ctgan.data_sampler import DataSampler
 
-##모델의 input_dimention이 높을 때, 많은 feature수를 사용할 때. 
-class Encoder(nn.Module):
-    def __init__(self, input_dim, latent_dim):
+
+class CNNEncoder(nn.Module):
+    def __init__(self, input_dim=64, latent_dim=64):
         super().__init__()
-        self.fc1      = nn.Linear(input_dim, 1024)
-        self.bn1      = nn.BatchNorm1d(1024)
-        self.fc_mu    = nn.Linear(1024, latent_dim)
-        self.fc_logvar= nn.Linear(1024, latent_dim)
-        self.apply(init_weights)
+        self.net = nn.Sequential(
+            nn.Conv1d(1, 16, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Flatten()
+        )
+        self.fc_mu = nn.Linear(32 * input_dim, latent_dim)
+        self.fc_logvar = nn.Linear(32 * input_dim, latent_dim)
 
     def forward(self, x):
-        h      = F.relu(self.bn1(self.fc1(x)))
-        mu     = self.fc_mu(h)
-        logvar = self.fc_logvar(h)
-        z      = reparameterize(mu, logvar)
-        return z, mu, logvar
-
-
-class Generator(nn.Module):
-    def __init__(self, z_dim=32, feature_maps=32, output_channels=1):
-        super().__init__()
-        self.fc = nn.Linear(z_dim, feature_maps*8*4*4)
-        self.deconv = nn.Sequential(
-            nn.BatchNorm2d(feature_maps*8), nn.ReLU(True),
-            nn.ConvTranspose2d(feature_maps*8, feature_maps*4, 4,2,1),
-            nn.BatchNorm2d(feature_maps*4), nn.ReLU(True),
-            nn.ConvTranspose2d(feature_maps*4, feature_maps*2, 4,2,1),
-            nn.BatchNorm2d(feature_maps*2), nn.ReLU(True),
-            nn.ConvTranspose2d(feature_maps*2, feature_maps,   4,2,1),
-            nn.BatchNorm2d(feature_maps),       nn.ReLU(True),
-            nn.ConvTranspose2d(feature_maps,     output_channels,4,2,1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, z):
-        x = self.fc(z).view(z.size(0), -1, 4, 4)
-        return self.deconv(x)
-
-
-class Discriminator(nn.Module):
-    def __init__(self, input_channels=1, feature_maps=32):
-        super().__init__()
-        self.feature_extractor = nn.Sequential(
-            nn.Conv2d(input_channels, feature_maps, 4,2,1),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(feature_maps, feature_maps*2, 4,2,1),
-            nn.BatchNorm2d(feature_maps*2), nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(feature_maps*2, feature_maps*4, 4,2,1),
-            nn.BatchNorm2d(feature_maps*4), nn.LeakyReLU(0.2, inplace=True),
-            nn.AdaptiveAvgPool2d((1,1))
-        )
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(feature_maps*4, 1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x, return_features=False):
-        features = self.feature_extractor(x)
-        scores = self.classifier(features)
-        if return_features:
-            return scores, features.view(x.size(0), -1)
-        return scores
-
-
-class Classifier(nn.Module):
-    def __init__(self, input_channels=1, feature_maps=32, num_classes=2):
-        super().__init__()
-        self.main = nn.Sequential(
-            nn.Conv2d(input_channels, feature_maps, 4,2,1),
-            nn.BatchNorm2d(feature_maps), nn.ReLU(True),
-            nn.Conv2d(feature_maps, feature_maps*2, 4,2,1),
-            nn.BatchNorm2d(feature_maps*2), nn.ReLU(True),
-            nn.Conv2d(feature_maps*2, feature_maps*4, 4,2,1),
-            nn.BatchNorm2d(feature_maps*4), nn.ReLU(True),
-            nn.AdaptiveAvgPool2d((1,1))
-        )
-        self.classifier = nn.Linear(feature_maps*4, num_classes)
-
-    def forward(self, x):
-        x = self.main(x).view(x.size(0), -1)
-        return self.classifier(x)
-    
-
-def fine_tune(self, train_loader):
-
-        for param in self.encoder.parameters():
-            param.requires_grad = False
-
-        self.opt_gen = torch.optim.Adam(self.generator.parameters(), lr=self.opt_gen.param_groups[0]['lr'])
-
-        for epoch in tqdm(range(self.epochs), desc = "Fine Tuning"):
-            g_totals = {'vae':0, 'info':0, 'advcls':0}
-            d_total = 0
-
-            for x, y in tqdm(train_loader, desc=f"Fine-tune Epoch {epoch+1}/{self.epochs}"):
-                x, y = x.to(self.device), y.to(self.device)
-                flat = x.view(x.size(0), -1)
-                with torch.no_grad(): 
-                    z, mu, logvar = self.encoder(flat)
-
-                x_hat = self.generator(z)
-
-                rec = F.mse_loss(x_hat, x)
-                kl  = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-                vae = rec + kl
-
-                advcls, d_loss, adv, cls = self.compute_gan_losses(x, x_hat, y)
-
-                real_score, real_feat = self.discriminator(x, return_features=True)
-                fake_score, fake_feat = self.discriminator(x_hat, return_features=True)
-                info = self.compute_info_loss(real_feat, fake_feat)
-
-                g_loss = (self.lambda_vae * vae +
-                          self.lambda_info * info +
-                          self.lambda_advcls * advcls)
-
-                # D update
-                self.opt_disc.zero_grad()
-                d_loss.backward()
-                self.opt_disc.step()
-
-                # G update twice
-                for _ in range(2):
-                    self.opt_gen.zero_grad()
-
-                    x_hat = self.generator(z)
-                    rec = F.mse_loss(x_hat, x)
-                    kl  = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-                    vae = rec + kl
-
-                    advcls, _, _, _ = self.compute_gan_losses(x, x_hat, y)
-                    _, real_feat = self.discriminator(x, return_features=True)
-                    _, fake_feat = self.discriminator(x_hat, return_features=True)
-                    info = self.compute_info_loss(real_feat, fake_feat)
-
-                    g_loss = (self.lambda_vae * vae +
-                            self.lambda_info * info +
-                            self.lambda_advcls * advcls)
-
-                    g_loss.backward()
-                    self.opt_gen.step()
-                
-                # C update
-                self.opt_cls.zero_grad()
-                real_logits = self.classifier(x)
-                loss_rcls  = F.cross_entropy(real_logits, y)
-                loss_rcls.backward()
-                self.opt_cls.step()
-
-                g_totals['vae']   += vae.item()
-                g_totals['info']  += info.item()
-                g_totals['advcls']+= advcls.item()
-                d_total           += d_loss.item()
-
-##################################################################################################################################
-# Convolution Encoder Part
-import os
-import wandb
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from sklearn.preprocessing import MinMaxScaler
-from tqdm import tqdm
-
-from ops import reparameterize, init_weights
-from utils import TabularDataset
-import mlflow
-
-class Encoder(nn.Module):
-    def __init__(self, input_shape=(1, 64, 64), latent_dim=64):
-        super().__init__()
-        self.latent_dim = latent_dim
-        self.conv = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=4, stride=2, padding=1),  # 64 -> 32
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1), # 32 -> 16
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1), # 16 -> 8
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1), # 8 -> 4
-            nn.BatchNorm2d(256),
-            nn.ReLU(),
-        )
-        self.flatten = nn.Flatten()
-        self.fc_mu = nn.Linear(256 * 4 * 4, latent_dim)
-        self.fc_logvar = nn.Linear(256 * 4 * 4, latent_dim)
-
-    def forward(self, x):
-        h = self.conv(x)
-        h = self.flatten(h)
+        x = x.unsqueeze(1)  # [B, 1, D]
+        h = self.net(x)
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
         z = reparameterize(mu, logvar)
         return z, mu, logvar
 
-class Generator(nn.Module):
-    def __init__(self, z_dim=64, output_shape=(1, 64, 64)):
+
+class Residual(nn.Module):
+    def __init__(self, i, o):
         super().__init__()
-        self.init_size = output_shape[1] // 4
-        self.fc = nn.Linear(z_dim, 256 * self.init_size * self.init_size)
-        self.deconv = nn.Sequential(
-            nn.BatchNorm2d(256),
-            nn.ReLU(),  # Remove inplace=True
-            nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(),  # Remove inplace=True
-            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),  # Remove inplace=True
-            nn.Conv2d(64, output_shape[0], kernel_size=3, stride=1, padding=1),
-            nn.Tanh()
-        )
-
-    def forward(self, z):
-        x = self.fc(z).view(z.size(0), 256, self.init_size, self.init_size)
-        return self.deconv(x)
-
-class Discriminator(nn.Module):
-    def __init__(self, input_channels=1):
-        super().__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(input_channels, 64, 4, stride=2, padding=1),
-            nn.LeakyReLU(0.2),  # Remove inplace=True
-            nn.Conv2d(64, 128, 4, stride=2, padding=1),
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(0.2),  # Remove inplace=True
-            nn.Conv2d(128, 256, 4, stride=2, padding=1),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.2),  # Remove inplace=True
-            nn.AdaptiveAvgPool2d((1, 1))
-        )
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(256, 1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x, return_features=False):
-        feat = self.conv(x)
-        out = self.classifier(feat)
-        if return_features:
-            return out, feat.view(x.size(0), -1)
-        return out
-
-class Classifier(nn.Module):
-    def __init__(self, input_channels=1, num_classes=2):
-        super().__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(input_channels, 64, 4, stride=2, padding=1),
-            nn.ReLU(),  # Remove inplace=True
-            nn.Conv2d(64, 128, 4, stride=2, padding=1),
-            nn.ReLU(),  # Remove inplace=True
-            nn.Conv2d(128, 256, 4, stride=2, padding=1),
-            nn.ReLU(),  # Remove inplace=True
-            nn.AdaptiveAvgPool2d((1, 1))
-        )
-        self.fc = nn.Linear(256, num_classes)
+        self.fc = nn.Linear(i, o)
+        self.bn = nn.BatchNorm1d(o)
+        self.relu = nn.ReLU()
 
     def forward(self, x):
-        feat = self.conv(x)
-        return self.fc(feat.view(x.size(0), -1))
+        out = self.fc(x)
+        out = self.bn(out)
+        out = self.relu(out)
+        return torch.cat([x, out], dim=1)
 
-class VAETableGan(nn.Module):
-    def __init__(self,
-                 input_dim,
-                 batch_size,
-                 y_dim,
-                 delta_mean,
-                 delta_var,
-                 attrib_num,
-                 label_col,
-                 checkpoint_dir,
-                 sample_dir,
-                 dataset_name,
-                 test_id,
-                 device,
-                 lr,
-                 pre_epochs,
-                 epochs,
-                 lambda_vae: float = 1.0,
-                 lambda_info: float = 1.0,
-                 lambda_advcls: float = 1.0):
+
+class Generator(nn.Module):
+    def __init__(self, input_dim, dims, data_dim):
         super().__init__()
-        self.latent_dim     = 64
-        self.batch_size     = batch_size
-        self.delta_mean     = delta_mean
-        self.delta_var      = delta_var
-        self.attrib_num     = attrib_num
-        self.label_col      = label_col
+        seq = []
+        for dim in dims:
+            seq.append(Residual(input_dim, dim))
+            input_dim += dim
+        seq.append(nn.Linear(input_dim, data_dim))
+        self.model = nn.Sequential(*seq)
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class Discriminator(nn.Module):
+    def __init__(self, input_dim, dims, pac=10):
+        super().__init__()
+        self.pac = pac
+        total_in = input_dim * pac
+        seq = []
+        for dim in dims:
+            seq += [nn.Linear(total_in, dim), nn.LeakyReLU(0.2), nn.Dropout(0.5)]
+            total_in = dim
+        seq.append(nn.Linear(total_in, 1))
+        self.model = nn.Sequential(*seq)
+
+    def forward(self, x):
+        assert x.size(0) % self.pac == 0
+        return self.model(x.view(x.size(0) // self.pac, -1))
+
+
+class VAE_CTGAN(nn.Module):
+    def __init__(self, embedding_dim, z_dim, device, batch_size,
+                 lr_g, lr_d, lr_e, discriminator_steps, pac,
+                 sample_dir, checkpoint_dir, log_frequency):
+        super().__init__()
+        self.embedding_dim = embedding_dim
+        self.z_dim = z_dim
+        self.device = device
+        self.batch_size = batch_size
+        self.pac = pac
+        self.sample_dir = sample_dir
         self.checkpoint_dir = checkpoint_dir
-        self.sample_dir     = sample_dir
-        self.dataset_name   = dataset_name
-        self.test_id        = test_id
-        self.device         = device
-        self.input_dim      = input_dim * input_dim
-        self.pre_epochs     = pre_epochs
-        self.epochs         = epochs
-        self.global_step    = 0
-        self.lambda_vae     = lambda_vae
-        self.lambda_info    = lambda_info
-        self.lambda_advcls  = lambda_advcls
-        self.base_lr        = lr
+        self.log_frequency = log_frequency
+        self.d_steps = discriminator_steps
 
-        # modules
-        self.encoder       = Encoder(self.input_dim, self.latent_dim).to(device)
-        self.generator     = Generator(z_dim=self.latent_dim).to(device)
-        self.discriminator = Discriminator().to(device)
-        self.classifier    = Classifier(num_classes=y_dim).to(device)
+        self.encoder = CNNEncoder(input_dim=z_dim, latent_dim=z_dim).to(device)
+        self.generator = None
+        self.discriminator = None
 
-        # optimizers
-        self.opt_enc  = torch.optim.Adam(self.encoder.parameters(),       lr=lr)
-        self.opt_gen  = torch.optim.Adam(list(self.generator.parameters()),     lr=lr)
-        self.opt_disc = torch.optim.Adam(self.discriminator.parameters(), lr=lr*0.1)
-        self.opt_cls  = torch.optim.Adam(self.classifier.parameters(),    lr=lr)
+        self.opt_g = None
+        self.opt_d = None
+        self.opt_e = optim.Adam(self.encoder.parameters(), lr=lr_e)
 
-        self.prev_gmean = None
-        self.prev_gvar  = None
+        self.lr_g = lr_g
+        self.lr_d = lr_d
 
-    def compute_gan_losses(self, real_data, fake_data, labels):
-        real_score = self.discriminator(real_data)
-        fake_score = self.discriminator(fake_data.detach())
-        adv_loss   = F.binary_cross_entropy(fake_score, torch.ones_like(fake_score))
-        d_loss     = F.binary_cross_entropy(real_score, torch.ones_like(real_score)) + \
-                     F.binary_cross_entropy(fake_score, torch.zeros_like(fake_score))
+        self._transformer = None
+        self._data_sampler = None
 
-        real_logits= self.classifier(real_data)
-        fake_logits= self.classifier(fake_data)
-        cls_loss   = F.cross_entropy(real_logits, labels) + F.cross_entropy(fake_logits, labels)
-        advcls     = adv_loss + cls_loss
-        return advcls, d_loss, adv_loss, cls_loss
+    def calc_gradient_penalty(self, real_data, fake_data, discriminator):
+        alpha = torch.rand(real_data.size(0) // self.pac, 1, 1, device=self.device)
+        alpha = alpha.repeat(1, self.pac, real_data.size(1)).view(-1, real_data.size(1))
+        interpolates = alpha * real_data + (1 - alpha) * fake_data
+        interpolates.requires_grad_(True)
+        d_interpolates = discriminator(interpolates)
 
-    def compute_info_loss(self, real_feat, fake_feat):
-        mean_r = real_feat.mean(0, keepdim=True)
-        mean_f = fake_feat.mean(0, keepdim=True)
-        var_r  = real_feat.var(0, keepdim=True)
-        var_f  = fake_feat.var(0, keepdim=True)
+        gradients = torch.autograd.grad(
+            outputs=d_interpolates,
+            inputs=interpolates,
+            grad_outputs=torch.ones_like(d_interpolates),
+            create_graph=True,
+            retain_graph=True,
+            only_inputs=True
+        )[0]
+        gradients = gradients.view(gradients.size(0), -1)
+        gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * 10
+        return gradient_penalty
 
-        if self.prev_gmean is None:
-            self.prev_gmean = mean_r.detach()
-            self.prev_gvar  = var_r.detach()
+    def fit(self, train_path, epochs):
+        import pandas as pd
+        data = pd.read_csv(train_path)
+        discrete_cols = data.select_dtypes(include='object').columns.tolist()
 
-        gmean_r = 0.99*self.prev_gmean + 0.1*mean_r
-        gmean_f = 0.99*self.prev_gmean + 0.1*mean_f
-        gvar_r  = 0.99*self.prev_gvar  + 0.1*var_r
-        gvar_f  = 0.99*self.prev_gvar  + 0.1*var_f
+        self._transformer = DataTransformer()
+        self._transformer.fit(data, discrete_cols)
+        train_data = self._transformer.transform(data)
+        self._data_sampler = DataSampler(train_data, self._transformer.output_info_list, self.log_frequency)
 
-        info_loss = (
-            torch.clamp((gmean_r - gmean_f).abs() - self.delta_mean, min=0).sum() +
-            torch.clamp((gvar_r  - gvar_f ).abs() - self.delta_var,  min=0).sum()
-        )
+        cond_dim = self._data_sampler.dim_cond_vec()
+        data_dim = self._transformer.output_dimensions
 
-        self.prev_gmean, self.prev_gvar = gmean_r.detach(), gvar_r.detach()
-        return info_loss
+        self.generator = Generator(self.z_dim + cond_dim, [256, 256], data_dim).to(self.device)
+        self.discriminator = Discriminator(data_dim + cond_dim, [256, 256], self.pac).to(self.device)
 
-    def save(self):
-        os.makedirs(self.checkpoint_dir, exist_ok=True)
-        path = os.path.join(self.checkpoint_dir, f"{self.dataset_name}_{self.test_id}_{self.pre_epochs}_model.pt")
-        torch.save(self.state_dict(), path)
+        self.opt_g = optim.Adam(self.generator.parameters(), lr=self.lr_g, betas=(0.5, 0.9))
+        self.opt_d = optim.Adam(self.discriminator.parameters(), lr=self.lr_d, betas=(0.5, 0.9))
 
-    def load(self):
-        path = os.path.join(self.checkpoint_dir, f"{self.dataset_name}_{self.test_id}_{self.pre_epochs}_model.pt")
-        self.load_state_dict(torch.load(path, map_location=self.device))
-        self.eval()
+        mean = torch.zeros(self.batch_size, self.z_dim).to(self.device)
+        std = mean + 1
 
-    def train_model(self, args):
-        ds = TabularDataset(f"dataset/{self.dataset_name}/{self.dataset_name}.csv",
-                            int((self.input_dim)**0.5), self.attrib_num, self.label_col)
-        loader = DataLoader(ds, batch_size=self.batch_size, shuffle=True)
+        for epoch in range(epochs):
+            steps = max(len(train_data) // self.batch_size, 1)
+            for _ in range(steps):
+                for _ in range(self.d_steps):
+                    z_noise = torch.normal(mean=mean, std=std)
+                    condvec = self._data_sampler.sample_condvec(self.batch_size)
+                    if condvec is None:
+                        c1, m1, col, opt = None, None, None, None
+                        real = self._data_sampler.sample_data(train_data, self.batch_size, col, opt)
+                    else:
+                        c1, m1, col, opt = condvec
+                        c1 = torch.from_numpy(c1).to(self.device).float()
+                        real = self._data_sampler.sample_data(train_data, self.batch_size, col, opt)
+                        real = torch.from_numpy(real.astype('float32')).to(self.device)
+                        z_latent, mu, logvar = self.encoder(real)
+                        zc = torch.cat([z_latent, c1], dim=1)
+                        fake = self.generator(zc)
 
-        mlflow.set_experiment("VAE-TableGAN")
-        mlflow.start_run()
-        wandb.init(project="vae-tablegan", name=self.test_id, config=vars(args))
+                        x_fake = torch.cat([fake, c1], dim=1)
+                        x_real = torch.cat([real, c1], dim=1)
+                        gp = self.calc_gradient_penalty(x_real, x_fake, self.discriminator)
+                        d_real = self.discriminator(x_real)
+                        d_fake = self.discriminator(x_fake)
+                        d_loss = -(torch.mean(d_real) - torch.mean(d_fake)) + gp
 
-        for epoch in tqdm(range(self.epochs), desc="One-Stage Training"):
-            if epoch < self.weight_epochs:
-                lambda_info = 0.0
-                lambda_advcls = 0.0
-                lambda_vae = self.lambda_vae
-            else:
-                lambda_info = self.lambda_info
-                lambda_advcls = self.lambda_advcls
-                lambda_vae = self.lambda_vae*0.1
+                        self.opt_d.zero_grad()
+                        d_loss.backward()
+                        self.opt_d.step()
 
-                for param_group in self.opt_enc.param_groups:
-                    param_group['lr'] = self.base_lr * 0.001
+                # Train Generator + Encoder
+                z_latent, mu, logvar = self.encoder(real)
+                zc = torch.cat([z_latent, c1], dim=1)
+                fake = self.generator(zc)
+                x_fake = torch.cat([fake, c1], dim=1)
 
-            g_totals = {'vae': 0, 'info': 0, 'advcls': 0}
-            d_total = 0
-
-            torch.autograd.set_detect_anomaly(True)
-            
-            for x, y in tqdm(loader, desc=f"Epoch {epoch + 1}/{self.epochs}"):
-                x, y = x.to(self.device), y.to(self.device)
-                flat = x.view(x.size(0), -1)
-
-                # === Update Discriminator ===
-                self.discriminator.train()
-                self.opt_disc.zero_grad()
-                
-                z, mu, logvar = self.encoder(flat)
-                x_hat = self.generator(z)
-                
-                real_score = self.discriminator(x)
-                fake_score = self.discriminator(x_hat.detach())
-                d_loss = (F.binary_cross_entropy(real_score, torch.ones_like(real_score)) +
-                         F.binary_cross_entropy(fake_score, torch.zeros_like(fake_score)))
-                
-                d_loss.backward()
-                self.opt_disc.step()
-
-                # === Update Generator and Encoder ===
-                self.generator.train()
-                self.encoder.train()
-                self.opt_gen.zero_grad()
-                self.opt_enc.zero_grad()
-
-                # Fresh forward pass
-                z, mu, logvar = self.encoder(flat)
-                x_hat = self.generator(z)
-
-                # VAE losses
-                rec = F.mse_loss(x_hat, x)
+                g_score = self.discriminator(x_fake)
+                adv_loss = -torch.mean(g_score)
+                rec_loss = F.mse_loss(fake, real)
                 kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-                vae_loss = rec + kl
+                g_loss = adv_loss + rec_loss + kl
 
-                # GAN losses
-                fake_score = self.discriminator(x_hat)
-                adv_loss = F.binary_cross_entropy(fake_score, torch.ones_like(fake_score))
-                
-                # Classification losses
-                real_logits = self.classifier(x)
-                fake_logits = self.classifier(x_hat)
-                cls_loss = F.cross_entropy(real_logits, y) + F.cross_entropy(fake_logits, y)
-                
-                # Info loss
-                _, real_feat = self.discriminator(x, return_features=True)
-                _, fake_feat = self.discriminator(x_hat, return_features=True)
-                info_loss = self.compute_info_loss(real_feat, fake_feat)
-
-                # Combined generator loss
-                g_loss = (lambda_vae * vae_loss +
-                         lambda_info * info_loss +
-                         lambda_advcls * (adv_loss + cls_loss))
-
+                self.opt_g.zero_grad()
+                self.opt_e.zero_grad()
                 g_loss.backward()
-                self.opt_gen.step()
-                self.opt_enc.step()
+                self.opt_g.step()
+                self.opt_e.step()
 
-                # === Second Generator Update ===
-                self.opt_gen.zero_grad()
-                
-                # Use detached z for second update
-                with torch.no_grad():
-                    z_detached, _, _ = self.encoder(flat)
-                
-                x_hat_2 = self.generator(z_detached)
-                rec_2 = F.mse_loss(x_hat_2, x)
-                fake_score_2 = self.discriminator(x_hat_2)
-                adv_loss_2 = F.binary_cross_entropy(fake_score_2, torch.ones_like(fake_score_2))
-                
-                fake_logits_2 = self.classifier(x_hat_2)
-                cls_loss_2 = F.cross_entropy(fake_logits_2, y)
-                
-                _, fake_feat_2 = self.discriminator(x_hat_2, return_features=True)
-                info_loss_2 = self.compute_info_loss(real_feat.detach(), fake_feat_2)
+    def sample(self, n):
+        steps = n // self.batch_size + 1
+        out = []
+        for _ in range(steps):
+            z = torch.randn(self.batch_size, self.z_dim).to(self.device)
+            cond = self._data_sampler.sample_original_condvec(self.batch_size)
+            if cond is not None:
+                cond = torch.from_numpy(cond).to(self.device).float()
+                zc = torch.cat([z, cond], dim=1)
+            else:
+                zc = z
+            fake = self.generator(zc)
+            act = fake.detach().cpu().numpy()
+            out.append(act)
+        samples = np.concatenate(out, axis=0)[:n]
+        return self._transformer.inverse_transform(samples)
 
-                g_loss_2 = (lambda_vae * rec_2 +
-                           lambda_info * info_loss_2 +
-                           lambda_advcls * (adv_loss_2 + cls_loss_2))
-
-                g_loss_2.backward()
-                self.opt_gen.step()
-
-                # === Update Classifier ===
-                self.classifier.train()
-                self.opt_cls.zero_grad()
-                real_logits_cls = self.classifier(x)
-                cls_real_loss = F.cross_entropy(real_logits_cls, y)
-                cls_real_loss.backward()
-                self.opt_cls.step()
-
-                # === Accumulate loss for logging ===
-                g_totals['vae'] += vae_loss.item()
-                g_totals['info'] += info_loss.item()
-                g_totals['advcls'] += (adv_loss + cls_loss).item()
-                d_total += d_loss.item()
-
-            wandb.log({
-                "vae_loss": g_totals['vae'] / len(loader),
-                "info_loss": g_totals['info'] / len(loader),
-                "advcls_loss": g_totals['advcls'] / len(loader),
-                "d_loss": d_total / len(loader)
-            }, step=self.global_step)
-
-            self.global_step += 1
-
-        self.save()
-        mlflow.end_run()
-        wandb.finish()
+    def load(self, path):
+        self.load_state_dict(torch.load(path))
+        self.eval()
