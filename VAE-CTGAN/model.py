@@ -5,8 +5,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from ops import reparameterize
-from ctgan.data_transformer import DataTransformer
-from ctgan.data_sampler import DataSampler
+from data_transformer import DataTransformer
+from data_sampler import DataSampler
 
 
 class CNNEncoder(nn.Module):

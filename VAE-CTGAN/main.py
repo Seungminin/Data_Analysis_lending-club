@@ -16,7 +16,7 @@ def parse_args():
     parser.add_argument('--lr_d', type=float, default=2e-4)
     parser.add_argument('--lr_e', type=float, default=1e-4)
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
-    parser.add_argument('--dataset_path', type=str, default='dataset/loan.csv')
+    parser.add_argument('--dataset_path', type=str, default='train_category_1.csv')
     parser.add_argument('--discriminator_steps', type=int, default=1)
     parser.add_argument('--pac', type=int, default=10)
     parser.add_argument('--log_frequency', action='store_true')
@@ -54,7 +54,7 @@ def main():
         model.fit(args.dataset_path, epochs=args.epochs)
     else:
         model.load(os.path.join(args.checkpoint_dir, args.save_name))
-        samples = model.sample(n=1000)
+        samples = model.sample(n=540000)
         print(samples.head())
 
 
