@@ -107,10 +107,17 @@ class DataTransformer(object):
         self._column_raw_dtypes = raw_data.infer_objects().dtypes
         self._column_transform_info_list = []
         for column_name in raw_data.columns:
+            print(f"🔍 Processing column: {column_name}")
             if column_name in discrete_columns:
+                print(f"📦 Detected as DISCRETE")
                 column_transform_info = self._fit_discrete(raw_data[[column_name]])
             else:
+                print(f"📈 Detected as CONTINUOUS")
                 column_transform_info = self._fit_continuous(raw_data[[column_name]])
+                # GMM 상태 출력
+                gmm_model = column_transform_info.transform
+                n_valid = sum(gmm_model.valid_component_indicator)
+                print(f"   ✅ GMM fitted with {n_valid} valid components out of {gmm_model.max_clusters}")
 
             self.output_info_list.append(column_transform_info.output_info)
             self.output_dimensions += column_transform_info.output_dimensions

@@ -3,6 +3,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import pandas as pd
+import numpy as np
+import wandb
 
 from ops import reparameterize
 from data_transformer import DataTransformer
@@ -10,66 +13,76 @@ from data_sampler import DataSampler
 
 
 class CNNEncoder(nn.Module):
-    def __init__(self, input_dim=64, latent_dim=64):
+    def __init__(self, latent_dim=64):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv1d(1, 16, kernel_size=3, stride=1, padding=1),
+        self.conv = nn.Sequential(
+            nn.Conv1d(1, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1),
+            nn.Conv1d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Flatten()
+            nn.Conv1d(64, 128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv1d(128, 256, kernel_size=3, padding=1),
+            nn.ReLU()
         )
-        self.fc_mu = nn.Linear(32 * input_dim, latent_dim)
-        self.fc_logvar = nn.Linear(32 * input_dim, latent_dim)
+        self.flatten = nn.Flatten()
+        self.latent_dim = latent_dim
+        self.fc_mu = None
+        self.fc_logvar = None
 
     def forward(self, x):
-        x = x.unsqueeze(1)  
-        h = self.net(x)
+        x = x.unsqueeze(1)
+        h = self.flatten(self.conv(x))
+        if self.fc_mu is None:
+            dim = h.shape[1]
+            self.fc_mu = nn.Sequential(
+                nn.Linear(dim, dim // 2),
+                nn.ReLU(),
+                nn.Linear(dim // 2, self.latent_dim)
+            ).to(h.device)
+            self.fc_logvar = nn.Sequential(
+                nn.Linear(dim, dim // 2),
+                nn.ReLU(),
+                nn.Linear(dim // 2, self.latent_dim)
+            ).to(h.device)
+
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
         z = reparameterize(mu, logvar)
         return z, mu, logvar
 
 
-class Residual(nn.Module):
-    def __init__(self, i, o):
-        super().__init__()
-        self.fc = nn.Linear(i, o)
-        self.bn = nn.BatchNorm1d(o)
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        out = self.fc(x)
-        out = self.bn(out)
-        out = self.relu(out)
-        return torch.cat([x, out], dim=1)
-
-
 class Generator(nn.Module):
-    def __init__(self, input_dim, dims, data_dim):
+    def __init__(self, input_dim, data_dim):
         super().__init__()
-        seq = []
-        for dim in dims:
-            seq.append(Residual(input_dim, dim))
-            input_dim += dim
-        seq.append(nn.Linear(input_dim, data_dim))
-        self.model = nn.Sequential(*seq)
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Linear(256, data_dim)
+        )
 
     def forward(self, x):
         return self.model(x)
 
 
 class Discriminator(nn.Module):
-    def __init__(self, input_dim, dims, pac=10):
+    def __init__(self, input_dim, pac=10):
         super().__init__()
         self.pac = pac
         total_in = input_dim * pac
-        seq = []
-        for dim in dims:
-            seq += [nn.Linear(total_in, dim), nn.LeakyReLU(0.2), nn.Dropout(0.5)]
-            total_in = dim
-        seq.append(nn.Linear(total_in, 1))
-        self.model = nn.Sequential(*seq)
+        self.model = nn.Sequential(
+            nn.Linear(total_in, 256),
+            nn.LeakyReLU(0.2),
+            nn.Dropout(0.2),
+            nn.Linear(256, 256),
+            nn.LeakyReLU(0.2),
+            nn.Dropout(0.2),
+            nn.Linear(256, 1)
+        )
 
     def forward(self, x):
         assert x.size(0) % self.pac == 0
@@ -91,7 +104,7 @@ class VAE_CTGAN(nn.Module):
         self.log_frequency = log_frequency
         self.d_steps = discriminator_steps
 
-        self.encoder = CNNEncoder(input_dim=z_dim, latent_dim=z_dim).to(device)
+        self.encoder = CNNEncoder(latent_dim=z_dim).to(device)
         self.generator = None
         self.discriminator = None
 
@@ -125,10 +138,10 @@ class VAE_CTGAN(nn.Module):
         return gradient_penalty
 
     def fit(self, train_path, epochs):
-        import pandas as pd
         data = pd.read_csv(train_path)
-        discrete_cols = data.select_dtypes(include='object').columns.tolist()
+        discrete_cols = data.select_dtypes(include=['object', 'category']).columns.tolist()
 
+        print("Before DataTransformer")
         self._transformer = DataTransformer()
         self._transformer.fit(data, discrete_cols)
         train_data = self._transformer.transform(data)
@@ -137,8 +150,9 @@ class VAE_CTGAN(nn.Module):
         cond_dim = self._data_sampler.dim_cond_vec()
         data_dim = self._transformer.output_dimensions
 
-        self.generator = Generator(self.z_dim + cond_dim, [256, 256], data_dim).to(self.device)
-        self.discriminator = Discriminator(data_dim + cond_dim, [256, 256], self.pac).to(self.device)
+        print("After DataTransformer")
+        self.generator = Generator(self.z_dim + cond_dim, data_dim).to(self.device)
+        self.discriminator = Discriminator(data_dim + cond_dim, self.pac).to(self.device)
 
         self.opt_g = optim.Adam(self.generator.parameters(), lr=self.lr_g, betas=(0.5, 0.9))
         self.opt_d = optim.Adam(self.discriminator.parameters(), lr=self.lr_d, betas=(0.5, 0.9))
@@ -148,9 +162,8 @@ class VAE_CTGAN(nn.Module):
 
         for epoch in range(epochs):
             steps = max(len(train_data) // self.batch_size, 1)
-            for _ in range(steps):
+            for step in range(steps):
                 for _ in range(self.d_steps):
-                    z_noise = torch.normal(mean=mean, std=std)
                     condvec = self._data_sampler.sample_condvec(self.batch_size)
                     if condvec is None:
                         c1, m1, col, opt = None, None, None, None
@@ -175,7 +188,6 @@ class VAE_CTGAN(nn.Module):
                         d_loss.backward()
                         self.opt_d.step()
 
-                # Train Generator + Encoder
                 z_latent, mu, logvar = self.encoder(real)
                 zc = torch.cat([z_latent, c1], dim=1)
                 fake = self.generator(zc)
@@ -192,6 +204,16 @@ class VAE_CTGAN(nn.Module):
                 g_loss.backward()
                 self.opt_g.step()
                 self.opt_e.step()
+
+                wandb.log({
+                    "epoch": epoch,
+                    "step": step,
+                    "D_loss": d_loss.item(),
+                    "G_loss": g_loss.item(),
+                    "Adv_loss": adv_loss.item(),
+                    "Rec_loss": rec_loss.item(),
+                    "KL_loss": kl.item()
+                })
 
     def sample(self, n):
         steps = n // self.batch_size + 1

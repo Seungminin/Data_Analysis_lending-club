@@ -30,7 +30,6 @@ def parse_args():
 def main():
     args = parse_args()
 
-    wandb.init(project="vae-ctgan", config=vars(args))
     device = torch.device(args.device)
 
     model = VAE_CTGAN(
@@ -51,6 +50,7 @@ def main():
     show_all_parameters(model)
 
     if args.train:
+        wandb.init(project="vae-ctgan", config=vars(args))
         model.fit(args.dataset_path, epochs=args.epochs)
     else:
         model.load(os.path.join(args.checkpoint_dir, args.save_name))
