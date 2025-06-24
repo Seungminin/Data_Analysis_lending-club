@@ -23,7 +23,7 @@ class CNNEncoder(nn.Module):
         self.fc_logvar = nn.Linear(32 * input_dim, latent_dim)
 
     def forward(self, x):
-        x = x.unsqueeze(1)  # [B, 1, D]
+        x = x.unsqueeze(1)  
         h = self.net(x)
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
