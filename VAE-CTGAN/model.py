@@ -7,10 +7,12 @@ import pandas as pd
 import numpy as np
 import wandb
 
+from tqdm import tqdm
+from torch.utils.data import TensorDataset, DataLoader
+
 from ops import reparameterize
 from data_transformer import DataTransformer
 from data_sampler import DataSampler
-
 
 class CNNEncoder(nn.Module):
     def __init__(self, latent_dim=64):
@@ -94,19 +96,19 @@ class VAE_CTGAN(nn.Module):
                  lr_g, lr_d, lr_e, discriminator_steps, pac,
                  sample_dir, checkpoint_dir, log_frequency):
         super().__init__()
-        self.embedding_dim  = embedding_dim
-        self.z_dim          = z_dim
-        self.device         = device
-        self.batch_size     = batch_size
-        self.pac            = pac
-        self.sample_dir     = sample_dir
+        self.embedding_dim = embedding_dim
+        self.z_dim = z_dim
+        self.device = device
+        self.batch_size = batch_size
+        self.pac = pac
+        self.sample_dir = sample_dir
         self.checkpoint_dir = checkpoint_dir
-        self.log_frequency  = log_frequency
-        self.d_steps        = discriminator_steps
+        self.log_frequency = log_frequency
+        self.d_steps = discriminator_steps
 
-        self.encoder        = CNNEncoder(latent_dim=z_dim).to(device)
-        self.generator      = None
-        self.discriminator  = None
+        self.encoder = CNNEncoder(latent_dim=z_dim).to(device)
+        self.generator = None
+        self.discriminator = None
 
         self.opt_g = None
         self.opt_d = None
@@ -119,8 +121,11 @@ class VAE_CTGAN(nn.Module):
         self._data_sampler = None
 
     def calc_gradient_penalty(self, real_data, fake_data, discriminator):
-        alpha = torch.rand(real_data.size(0) // self.pac, 1, 1, device=self.device)
-        alpha = alpha.repeat(1, self.pac, real_data.size(1)).view(-1, real_data.size(1))
+        assert real_data.size(0) == fake_data.size(0)
+        batch_size = real_data.size(0)
+        alpha = torch.rand(batch_size, 1, device=self.device)
+        alpha = alpha.expand_as(real_data)
+
         interpolates = alpha * real_data + (1 - alpha) * fake_data
         interpolates.requires_grad_(True)
         d_interpolates = discriminator(interpolates)
@@ -133,60 +138,66 @@ class VAE_CTGAN(nn.Module):
             retain_graph=True,
             only_inputs=True
         )[0]
-        gradients = gradients.view(gradients.size(0), -1)
+
+        gradients = gradients.view(batch_size, -1)
         gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * 10
         return gradient_penalty
 
-    def fit(self, train_path, epochs):
-        data = pd.read_csv(train_path)
-        discrete_cols = data.select_dtypes(include=['object', 'category']).columns.tolist()
+    def train_from_transformed(self, data_path: str, transformer_path: str, epochs: int):
+        from utils import load_transformer
 
-        print("Before DataTransformer")
-        self._transformer = DataTransformer()
-        self._transformer.fit(data, discrete_cols)
-        train_data = self._transformer.transform(data)
-        self._data_sampler = DataSampler(train_data, self._transformer.output_info_list, self.log_frequency)
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        self._transformer = load_transformer(transformer_path)
+        data_transformed = pd.read_csv(data_path).values.astype(np.float32)
+        self._data_sampler = DataSampler(data_transformed, self._transformer.output_info_list, self.log_frequency)
 
         cond_dim = self._data_sampler.dim_cond_vec()
         data_dim = self._transformer.output_dimensions
 
-        print("After DataTransformer")
         self.generator = Generator(self.z_dim + cond_dim, data_dim).to(self.device)
         self.discriminator = Discriminator(data_dim + cond_dim, self.pac).to(self.device)
 
         self.opt_g = optim.Adam(self.generator.parameters(), lr=self.lr_g, betas=(0.5, 0.9))
         self.opt_d = optim.Adam(self.discriminator.parameters(), lr=self.lr_d, betas=(0.5, 0.9))
 
-        mean = torch.zeros(self.batch_size, self.z_dim).to(self.device)
-        std = mean + 1
+        data_tensor = torch.tensor(data_transformed, dtype=torch.float32)
+        train_loader = DataLoader(TensorDataset(data_tensor), batch_size=self.batch_size, shuffle=True)
 
-        for epoch in range(epochs):
-            steps = max(len(train_data) // self.batch_size, 1)
-            for step in range(steps):
-                for _ in range(self.d_steps):
-                    condvec = self._data_sampler.sample_condvec(self.batch_size)
-                    if condvec is None:
-                        c1, m1, col, opt = None, None, None, None
-                        real = self._data_sampler.sample_data(train_data, self.batch_size, col, opt)
-                    else:
-                        c1, m1, col, opt = condvec
-                        c1 = torch.from_numpy(c1).to(self.device).float()
-                        real = self._data_sampler.sample_data(train_data, self.batch_size, col, opt)
-                        real = torch.from_numpy(real.astype('float32')).to(self.device)
-                        z_latent, mu, logvar = self.encoder(real)
-                        zc = torch.cat([z_latent, c1], dim=1)
-                        fake = self.generator(zc)
+        for epoch in tqdm(range(epochs), desc="Epoch"):
+            for real_batch, in train_loader:
+                real_batch = real_batch.to(self.device)
+                condvec = self._data_sampler.sample_condvec(real_batch.size(0))
 
-                        x_fake = torch.cat([fake, c1], dim=1)
-                        x_real = torch.cat([real, c1], dim=1)
-                        gp = self.calc_gradient_penalty(x_real, x_fake, self.discriminator)
-                        d_real = self.discriminator(x_real)
-                        d_fake = self.discriminator(x_fake)
-                        d_loss = -(torch.mean(d_real) - torch.mean(d_fake)) + gp
+                if condvec is None:
+                    c1, m1, col, opt = None, None, None, None
+                    continue
+                else:
+                    c1, m1, col, opt = condvec
+                    c1 = torch.from_numpy(c1).to(self.device).float()
 
-                        self.opt_d.zero_grad()
-                        d_loss.backward()
-                        self.opt_d.step()
+                z_latent, mu, logvar = self.encoder(real_batch)
+                zc = torch.cat([z_latent, c1], dim=1)
+                fake = self.generator(zc)
+
+                min_len = min(real_batch.size(0), fake.size(0), c1.size(0))
+                real = real_batch[:min_len]
+                fake = fake[:min_len]
+                c1 = c1[:min_len]
+
+                if min_len % self.pac != 0:
+                    continue
+
+                x_fake = torch.cat([fake, c1], dim=1)
+                x_real = torch.cat([real, c1], dim=1)
+
+                gp = self.calc_gradient_penalty(x_real, x_fake, self.discriminator)
+                d_real = self.discriminator(x_real)
+                d_fake = self.discriminator(x_fake)
+                d_loss = -(torch.mean(d_real) - torch.mean(d_fake)) + gp
+
+                self.opt_d.zero_grad()
+                d_loss.backward()
+                self.opt_d.step()
 
                 z_latent, mu, logvar = self.encoder(real)
                 zc = torch.cat([z_latent, c1], dim=1)
@@ -207,13 +218,15 @@ class VAE_CTGAN(nn.Module):
 
                 wandb.log({
                     "epoch": epoch,
-                    "step": step,
                     "D_loss": d_loss.item(),
                     "G_loss": g_loss.item(),
                     "Adv_loss": adv_loss.item(),
                     "Rec_loss": rec_loss.item(),
                     "KL_loss": kl.item()
                 })
+
+            if epoch % 20 == 0:
+                torch.save(self.state_dict(), os.path.join(self.checkpoint_dir, f"vae_ctgan_epoch{epoch}.pt"))
 
     def sample(self, n):
         steps = n // self.batch_size + 1

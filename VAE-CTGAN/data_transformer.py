@@ -3,6 +3,7 @@
 from collections import namedtuple
 
 import numpy as np
+import pickle
 import pandas as pd
 from joblib import Parallel, delayed
 from rdt.transformers import ClusterBasedNormalizer, OneHotEncoder
@@ -270,3 +271,13 @@ class DataTransformer(object):
             'column_id': column_id,
             'value_id': np.argmax(one_hot),
         }
+
+
+    def save(self, path):
+        with open(path, 'wb') as f:
+            pickle.dump(self, f)
+
+    @staticmethod
+    def load(path):
+        with open(path, 'rb') as f:
+            return pickle.load(f)

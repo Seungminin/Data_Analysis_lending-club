@@ -26,3 +26,7 @@ def show_all_parameters(model):
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Total params: {total:,} | Trainable: {trainable:,}")
+
+def load_transformer(path):
+    import joblib
+    return joblib.load(path)
