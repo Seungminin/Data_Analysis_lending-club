@@ -94,19 +94,19 @@ class VAE_CTGAN(nn.Module):
                  lr_g, lr_d, lr_e, discriminator_steps, pac,
                  sample_dir, checkpoint_dir, log_frequency):
         super().__init__()
-        self.embedding_dim = embedding_dim
-        self.z_dim = z_dim
-        self.device = device
-        self.batch_size = batch_size
-        self.pac = pac
-        self.sample_dir = sample_dir
+        self.embedding_dim  = embedding_dim
+        self.z_dim          = z_dim
+        self.device         = device
+        self.batch_size     = batch_size
+        self.pac            = pac
+        self.sample_dir     = sample_dir
         self.checkpoint_dir = checkpoint_dir
-        self.log_frequency = log_frequency
-        self.d_steps = discriminator_steps
+        self.log_frequency  = log_frequency
+        self.d_steps        = discriminator_steps
 
-        self.encoder = CNNEncoder(latent_dim=z_dim).to(device)
-        self.generator = None
-        self.discriminator = None
+        self.encoder        = CNNEncoder(latent_dim=z_dim).to(device)
+        self.generator      = None
+        self.discriminator  = None
 
         self.opt_g = None
         self.opt_d = None
