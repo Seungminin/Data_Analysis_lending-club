@@ -4,13 +4,64 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt 
+import joblib
 
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 from torch.utils.data import Dataset
 from tqdm import tqdm
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from scipy.stats import wasserstein_distance
+
+class CustomDataTransformer:
+    def __init__(self, log_features=None):
+        self.log_features = log_features or []
+        self.label_encoders = {}
+        self.scaler = None
+        self.columns = None
+
+    def fit(self, df):
+        df = df.copy()
+        self.columns = df.columns.tolist()
+
+        # 1. Log transform
+        for col in self.log_features:
+            df[col] = np.log1p(df[col])
+
+        # 2. Label encoding
+        for col in df.select_dtypes(include='object').columns:
+            le = LabelEncoder()
+            df[col] = le.fit_transform(df[col])
+            self.label_encoders[col] = le
+
+        # 3. MinMaxScaler
+        self.scaler = MinMaxScaler(feature_range=(-1, 1))
+        self.scaler.fit(df)
+        return self
+
+    def transform(self, df):
+        df = df.copy()
+        for col in self.log_features:
+            df[col] = np.log1p(df[col])
+        for col, le in self.label_encoders.items():
+            df[col] = le.transform(df[col])
+        return pd.DataFrame(self.scaler.transform(df), columns=self.columns)
+
+    def inverse_transform(self, arr):
+        df = pd.DataFrame(self.scaler.inverse_transform(arr), columns=self.columns)
+        for col, le in self.label_encoders.items():
+            df[col] = np.round(df[col]).astype(int)
+            df[col] = le.inverse_transform(df[col])
+        for col in self.log_features:
+            df[col] = np.expm1(df[col])
+        return df
+
+    def save(self, path):
+        joblib.dump(self, path)
+
+    @staticmethod
+    def load(path):
+        return joblib.load(path)
 
 class TabularDataset(Dataset):
     def __init__(self, csv_path, input_dim, attrib_num, label_col=-1):
@@ -61,8 +112,7 @@ def generate_data(model, save_dir, num_samples=10000, batch_size = 64):
     original = original.drop(columns=['loan_status'])  
     feature_names = original.columns.tolist()
 
-    scaler = MinMaxScaler(feature_range=(-1,1))
-    scaler.fit(original)
+    transformer = CustomDataTransformer.load(f"{save_dir}/transformer.pkl")
     all_generated = []
 
     for i in tqdm(range(0, num_samples, batch_size), desc = 'Generate Samples'):
@@ -78,7 +128,7 @@ def generate_data(model, save_dir, num_samples=10000, batch_size = 64):
         if len(fake.shape) == 3:
             fake = fake.reshape(fake.shape[0], -1)  # (N, H×W)
 
-        fake_part = scaler.inverse_transform(fake[:, :original.shape[1]])
+        fake_part = transformer.inverse_transform(fake[:, :len(feature_names)])
 
         for j, col in enumerate(feature_names):
             real_unique = np.sort(original[col].unique())

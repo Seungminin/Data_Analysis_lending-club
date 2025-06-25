@@ -3,15 +3,16 @@ import torch
 import argparse
 import wandb
 import mlflow
+import pandas as pd
 from model import VAETableGan
-from utils import pp, generate_data, show_all_parameters
+from utils import pp, generate_data, show_all_parameters, CustomDataTransformer
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--epoch',       type=int,   default=200)
     parser.add_argument('--lr',          type=float, default=0.0002)
     parser.add_argument('--batch_size',  type=int,   default=64)
-    parser.add_argument('--input_dim',   type=int,   default=6)   # will be treated as image width/height/ feature수가 20개 정도이니 루트20은 4.47정도, 여유롭게 input_dim 6으로 지향.
+    parser.add_argument('--input_dim',   type=int,   default=6)
     parser.add_argument('--dataset',     type=str,   default='loan_1')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoint')
     parser.add_argument('--sample_dir',     type=str, default='samples')
@@ -85,6 +86,28 @@ def main():
     show_all_parameters(model)
 
     if args.train:
+        raw_data = pd.read_csv(f"dataset/{args.dataset}/{args.dataset}.csv")
+        y = raw_data['loan_status']
+        X = raw_data.drop(columns=['loan_status'])
+
+        print(f"[INFO] Raw X shape: {X.shape}, y shape: {y.shape}")
+
+        log_cols = ['annual_inc', 'avg_cur_bal', 'revol_bal', 'installment', 'total_pymnt', 'funded_amnt', 'loan_amnt']
+
+        transformer = CustomDataTransformer(log_features=log_cols)
+        transformer.fit(X)
+        X_transformed = transformer.transform(X)
+
+        print(f"[INFO] Transformed X shape: {X_transformed.shape}")
+
+        processed = X_transformed.copy()
+        processed['loan_status'] = y.values
+        save_path = f"dataset/{args.dataset}/{args.dataset}_processed.csv"
+        processed.to_csv(save_path, index=False)
+        transformer.save(f"{args.sample_dir}/transformer.pkl")
+
+        model.dataset_name = args.dataset
+
         wandb.init(project="vae-tablegan", name=args.test_id, config=vars(args))
         model.train_model(args)
     else:

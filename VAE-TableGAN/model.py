@@ -211,7 +211,7 @@ class VAETableGan(nn.Module):
         self.eval()
 
     def train_model(self, args):
-        ds = TabularDataset(f"dataset/{self.dataset_name}/{self.dataset_name}.csv",
+        ds = TabularDataset(f"dataset/{self.dataset_name}/{self.dataset_name}_processed.csv",
                             int((self.input_dim)**0.5), self.attrib_num, self.label_col)
         loader = DataLoader(ds, batch_size=self.batch_size, shuffle=True)
 
