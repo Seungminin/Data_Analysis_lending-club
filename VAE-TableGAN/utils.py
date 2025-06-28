@@ -126,7 +126,8 @@ def generate_data(model, save_dir, num_samples=10000, batch_size = 64):
         if len(fake.shape) == 3:
             fake = fake.reshape(fake.shape[0], -1)  # (N, H×W)
 
-        fake_part = transformer.inverse_transform(fake[:, :len(feature_names)])
+        fake_part_df = transformer.inverse_transform(fake[:, :len(feature_names)])
+        fake_part = fake_part_df.values  # NumPy array로 변환
 
         for j, col in enumerate(feature_names):
             real_unique = np.sort(original[col].unique())
@@ -137,9 +138,11 @@ def generate_data(model, save_dir, num_samples=10000, batch_size = 64):
     
     full_generated = np.vstack(all_generated)
     output_path = os.path.join(save_dir, f"{model.dataset_name}_{model.test_id}_{model.pre_epochs}_generated_CNNEncoder.csv")
-    pd.DataFrame(full_generated, columns=feature_names).to_csv(output_path, index=False)
+    synthetic_data = pd.DataFrame(full_generated, columns=feature_names)
 
-    print(f"[+] Generated data saved to {output_path}")
+    print(f"[+] return data_path {output_path}")
+
+    return synthetic_data, output_path
 
 def padding_duplicating(data, row_size):
     arr_data = np.array(data.values.tolist())

@@ -4,6 +4,7 @@ import argparse
 import wandb
 import mlflow
 import pandas as pd
+import pickle
 from model import VAETableGan
 from utils import pp, generate_data, show_all_parameters, CustomDataTransformer
 
@@ -112,7 +113,24 @@ def main():
         model.train_model(args)
     else:
         model.load()
-        generate_data(model, args.sample_dir, num_samples=540000, batch_size=128)
+        synthetic_data, output_path = generate_data(model, args.sample_dir, num_samples=540000, batch_size=128)
+
+        transformer_path = os.path.join(args.sample_dir, "transformer.pkl")
+        if os.path.exists(transformer_path):
+            print("[INFO] Applying inverse_transform using saved transformer...")
+            with open(transformer_path, 'rb') as f:
+                transformer = pickle.load(f)
+            try:
+                synthetic_data = transformer.inverse_transform(synthetic_data)
+                print("[INFO] inverse_transform applied successfully.")
+            except Exception as e:
+                print(f"[WARN] inverse_transform failed: {e}")
+        else:
+            print("[WARN] No transformer.pkl found. Saving raw transformed data.")
+
+        # 💾 Save
+        synthetic_data.to_csv(output_path, index=False)
+        print(f"[INFO] Generated data saved to: {output_path}")
 
 if __name__ == '__main__':
     main()
