@@ -71,6 +71,9 @@ def main():
 
     elif args.train:
         wandb.init(project="vae-ctgan", config=vars(args))
+        
+        transformer = load_transformer(args.transformer_path)
+        print("✅ Transformer output dim:", transformer.output_dimensions)
 
         # Load preprocessed data and transformer
         transformed_df = pd.read_csv(args.preprocessed_path)

@@ -15,44 +15,39 @@ from data_transformer import DataTransformer
 from data_sampler import DataSampler
 
 class CNNEncoder(nn.Module):
-    def __init__(self, latent_dim=64):
+    def __init__(self, latent_dim=64, input_length=64):
         super().__init__()
         self.conv = nn.Sequential(
             nn.Conv1d(1, 32, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv1d(32, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv1d(64, 128, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv1d(128, 256, kernel_size=3, padding=1),
             nn.ReLU()
         )
         self.flatten = nn.Flatten()
         self.latent_dim = latent_dim
-        self.fc_mu = None
-        self.fc_logvar = None
+        self.input_length = input_length
+
+        # output: 64 channels × input_length
+        conv_output_dim = 64 * input_length
+
+        self.fc_mu = nn.Sequential(
+            nn.Linear(conv_output_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, latent_dim)
+        )
+        self.fc_logvar = nn.Sequential(
+            nn.Linear(conv_output_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, latent_dim)
+        )
 
     def forward(self, x):
-        x = x.unsqueeze(1)
-        h = self.flatten(self.conv(x))
-        if self.fc_mu is None:
-            dim = h.shape[1]
-            self.fc_mu = nn.Sequential(
-                nn.Linear(dim, dim // 2),
-                nn.ReLU(),
-                nn.Linear(dim // 2, self.latent_dim)
-            ).to(h.device)
-            self.fc_logvar = nn.Sequential(
-                nn.Linear(dim, dim // 2),
-                nn.ReLU(),
-                nn.Linear(dim // 2, self.latent_dim)
-            ).to(h.device)
-
+        x = x.unsqueeze(1)  # [B, 1, input_length]
+        h = self.flatten(self.conv(x))  # [B, 64 × input_length]
         mu = self.fc_mu(h)
         logvar = self.fc_logvar(h)
         z = reparameterize(mu, logvar)
         return z, mu, logvar
-
 
 class Generator(nn.Module):
     def __init__(self, input_dim, data_dim):
@@ -106,7 +101,7 @@ class VAE_CTGAN(nn.Module):
         self.log_frequency = log_frequency
         self.d_steps = discriminator_steps
 
-        self.encoder = CNNEncoder(latent_dim=z_dim).to(device)
+        self.encoder = CNNEncoder(latent_dim=z_dim, input_length=209).to(device)
         self.generator = None
         self.discriminator = None
 
@@ -164,12 +159,14 @@ class VAE_CTGAN(nn.Module):
         train_loader = DataLoader(TensorDataset(data_tensor), batch_size=self.batch_size, shuffle=True)
 
         for epoch in tqdm(range(epochs), desc="Epoch"):
-            for real_batch, in train_loader:
+            batch_iter = tqdm(train_loader, desc=f"Epoch {epoch}", leave=False)
+            for real_batch, in batch_iter:
                 real_batch = real_batch.to(self.device)
                 condvec = self._data_sampler.sample_condvec(real_batch.size(0))
 
                 if condvec is None:
                     c1, m1, col, opt = None, None, None, None
+                    print("⚠️ Skipped batch due to missing condvec.")
                     continue
                 else:
                     c1, m1, col, opt = condvec
@@ -179,13 +176,15 @@ class VAE_CTGAN(nn.Module):
                 zc = torch.cat([z_latent, c1], dim=1)
                 fake = self.generator(zc)
 
+                # Adjust min_len to be divisible by pac
                 min_len = min(real_batch.size(0), fake.size(0), c1.size(0))
+                min_len = (min_len // self.pac) * self.pac  # ⬅️ 자동 조정
+                if min_len == 0:
+                    continue  # 예외 방지
+
                 real = real_batch[:min_len]
                 fake = fake[:min_len]
                 c1 = c1[:min_len]
-
-                if min_len % self.pac != 0:
-                    continue
 
                 x_fake = torch.cat([fake, c1], dim=1)
                 x_real = torch.cat([real, c1], dim=1)
