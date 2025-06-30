@@ -15,7 +15,7 @@ from data_transformer import DataTransformer
 from data_sampler import DataSampler
 
 class CNNEncoder(nn.Module):
-    def __init__(self, latent_dim=64, input_length=64):
+    def __init__(self, latent_dim=64, input_length=209):
         super().__init__()
         self.conv = nn.Sequential(
             nn.Conv1d(1, 32, kernel_size=3, padding=1),
@@ -160,6 +160,10 @@ class VAE_CTGAN(nn.Module):
 
         for epoch in tqdm(range(epochs), desc="Epoch"):
             batch_iter = tqdm(train_loader, desc=f"Epoch {epoch}", leave=False)
+
+            total_d_loss = total_g_loss = total_adv_loss = total_rec_loss = total_kl_loss = 0.0
+            num_batches = 0
+
             for real_batch, in batch_iter:
                 real_batch = real_batch.to(self.device)
                 condvec = self._data_sampler.sample_condvec(real_batch.size(0))
@@ -215,17 +219,26 @@ class VAE_CTGAN(nn.Module):
                 self.opt_g.step()
                 self.opt_e.step()
 
+                total_d_loss += d_loss.item()
+                total_g_loss += g_loss.item()
+                total_adv_loss += adv_loss.item()
+                total_rec_loss += rec_loss.item()
+                total_kl_loss += kl.item()
+                num_batches += 1
+
+
+            if num_batches > 0:
                 wandb.log({
                     "epoch": epoch,
-                    "D_loss": d_loss.item(),
-                    "G_loss": g_loss.item(),
-                    "Adv_loss": adv_loss.item(),
-                    "Rec_loss": rec_loss.item(),
-                    "KL_loss": kl.item()
+                    "D_loss": total_d_loss / num_batches,
+                    "G_loss": total_g_loss / num_batches,
+                    "Adv_loss": total_adv_loss / num_batches,
+                    "Rec_loss": total_rec_loss / num_batches,
+                    "KL_loss": total_kl_loss / num_batches
                 })
 
-            if epoch % 20 == 0:
-                torch.save(self.state_dict(), os.path.join(self.checkpoint_dir, f"vae_ctgan_epoch{epoch}.pt"))
+            if epoch == epoch-1:
+                torch.save(self.state_dict(), os.path.join(self.checkpoint_dir, f"vae_ctgan_final.pt"))
 
     def sample(self, n):
         steps = n // self.batch_size + 1
@@ -244,6 +257,23 @@ class VAE_CTGAN(nn.Module):
         samples = np.concatenate(out, axis=0)[:n]
         return self._transformer.inverse_transform(samples)
 
-    def load(self, path):
-        self.load_state_dict(torch.load(path))
+    def load(self, path, transformer_path, data_path):
+        from utils import load_transformer
+
+        self._transformer = load_transformer(transformer_path)
+        data = pd.read_csv(data_path).values.astype(np.float32)
+        self._data_sampler = DataSampler(data, self._transformer.output_info_list, self.log_frequency)
+
+        cond_dim = self._data_sampler.dim_cond_vec()
+        data_dim = self._transformer.output_dimensions
+
+        print(f"cond_dim : {cond_dim}, data_dim : {data_dim}, pac : {self.pac}\n")
+        # ✅ 구조 동일하게 맞춰서 생성
+        self.generator = Generator(self.z_dim + cond_dim, data_dim).to(self.device)
+        self.discriminator = Discriminator(data_dim + cond_dim, self.pac).to(self.device)
+
+        # 🔐 weight 불러오기
+        state_dict = torch.load(path, map_location=self.device)
+        self.load_state_dict(state_dict)
         self.eval()
+        print(f"✅ Loaded checkpoint from: {path}")

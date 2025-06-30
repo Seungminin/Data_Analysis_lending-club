@@ -10,6 +10,10 @@ requirements.txt
 ## .pkl파일 모두 지우기
 *.pkl
 
+## checkpoint 파일 모두 생략
+*.pt
+
+
 ## original tablegan gitignore file
 
 \.idea/

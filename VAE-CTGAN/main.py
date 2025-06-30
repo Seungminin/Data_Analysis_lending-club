@@ -4,9 +4,12 @@ import argparse
 import wandb
 import pandas as pd
 import joblib
+import numpy as np
+
 from model import VAE_CTGAN
 from data_transformer import DataTransformer
 from utils import show_all_parameters, load_transformer
+from data_sampler import DataSampler
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -20,7 +23,7 @@ def parse_args():
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument('--dataset_path', type=str, default='dataset/train_category_1.csv')
     parser.add_argument('--discriminator_steps', type=int, default=1)
-    parser.add_argument('--pac', type=int, default=10)
+    parser.add_argument('--pac', type=int, default=4)
     parser.add_argument('--log_frequency', action='store_true')
     parser.add_argument('--sample_dir', type=str, default='samples')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
@@ -62,7 +65,6 @@ def main():
         transformer = DataTransformer()
         transformer.fit(df, discrete_cols)
         transformed_data = transformer.transform(df)
-
         # Save
         pd.DataFrame(transformed_data).to_csv(args.preprocessed_path, index=False)
         joblib.dump(transformer, args.transformer_path)
@@ -84,15 +86,18 @@ def main():
         )
 
     else:
-        model.load(os.path.join(args.checkpoint_dir, args.save_name))
-        model._transformer = load_transformer(args.transformer_path)
+        model.load(
+            path=os.path.join(args.checkpoint_dir, args.save_name),
+            transformer_path=args.transformer_path,
+            data_path=args.preprocessed_path
+        )
         df = model.sample(n=540000)
+        df.to_csv(os.path.join(args.sample_dir, "VAE-CTGAN_generated_data.csv"), index=False)
+        print(f"✅ Synthetic data saved to {args.sample_dir}/generated_data.csv")
         print(df.head())
 
 if __name__ == "__main__":
     main()
-
-
 
 """
 --preprocess : 데이터 전처리, categorical은 one-hot encoding, continuous GMM 모드 정규화
