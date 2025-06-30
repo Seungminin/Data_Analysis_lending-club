@@ -138,8 +138,7 @@ class VAE_CTGAN(nn.Module):
         gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * 10
         return gradient_penalty
 
-    def train_from_transformed(self, data_path: str, transformer_path: str, epochs: int, warmup_epochs: int = 40,
-                                alpha_adv: float = 1.0, alpha_rec: float = 1.0, alpha_kl: float = 1.0):
+    def train_from_transformed(self, data_path: str, transformer_path: str, epochs: int):
         from utils import load_transformer
 
         os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -170,6 +169,7 @@ class VAE_CTGAN(nn.Module):
                 condvec = self._data_sampler.sample_condvec(real_batch.size(0))
 
                 if condvec is None:
+                    c1, m1, col, opt = None, None, None, None
                     print("⚠️ Skipped batch due to missing condvec.")
                     continue
                 else:
@@ -180,10 +180,11 @@ class VAE_CTGAN(nn.Module):
                 zc = torch.cat([z_latent, c1], dim=1)
                 fake = self.generator(zc)
 
+                # Adjust min_len to be divisible by pac
                 min_len = min(real_batch.size(0), fake.size(0), c1.size(0))
-                min_len = (min_len // self.pac) * self.pac
+                min_len = (min_len // self.pac) * self.pac  # ⬅️ 자동 조정
                 if min_len == 0:
-                    continue
+                    continue  # 예외 방지
 
                 real = real_batch[:min_len]
                 fake = fake[:min_len]
@@ -192,57 +193,39 @@ class VAE_CTGAN(nn.Module):
                 x_fake = torch.cat([fake, c1], dim=1)
                 x_real = torch.cat([real, c1], dim=1)
 
+                gp = self.calc_gradient_penalty(x_real, x_fake, self.discriminator)
+                d_real = self.discriminator(x_real)
+                d_fake = self.discriminator(x_fake)
+                d_loss = -(torch.mean(d_real) - torch.mean(d_fake)) + gp
+
+                self.opt_d.zero_grad()
+                d_loss.backward()
+                self.opt_d.step()
+
+                z_latent, mu, logvar = self.encoder(real)
+                zc = torch.cat([z_latent, c1], dim=1)
+                fake = self.generator(zc)
+                x_fake = torch.cat([fake, c1], dim=1)
+
+                g_score = self.discriminator(x_fake)
+                adv_loss = -torch.mean(g_score)
                 rec_loss = F.mse_loss(fake, real)
                 kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+                g_loss = adv_loss + rec_loss + kl
 
-                if epoch < warmup_epochs:
-                    # VAE stage
-                    g_loss = alpha_rec * rec_loss + alpha_kl * kl
-                    self.opt_g.zero_grad()
-                    self.opt_e.zero_grad()
-                    g_loss.backward()
-                    self.opt_g.step()
-                    self.opt_e.step()
+                self.opt_g.zero_grad()
+                self.opt_e.zero_grad()
+                g_loss.backward()
+                self.opt_g.step()
+                self.opt_e.step()
 
-                    total_g_loss += g_loss.item()
-                    total_rec_loss += rec_loss.item()
-                    total_kl_loss += kl.item()
-
-                else:
-                    # Full adversarial stage
-                    gp = self.calc_gradient_penalty(x_real, x_fake, self.discriminator)
-                    d_real = self.discriminator(x_real)
-                    d_fake = self.discriminator(x_fake)
-                    d_loss = -(torch.mean(d_real) - torch.mean(d_fake)) + gp
-
-                    self.opt_d.zero_grad()
-                    d_loss.backward()
-                    self.opt_d.step()
-
-                    z_latent, mu, logvar = self.encoder(real)
-                    zc = torch.cat([z_latent, c1], dim=1)
-                    fake = self.generator(zc)
-                    x_fake = torch.cat([fake, c1], dim=1)
-                    g_score = self.discriminator(x_fake)
-
-                    adv_loss = -torch.mean(g_score)
-                    rec_loss = F.mse_loss(fake, real)
-                    kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-                    g_loss = alpha_adv * adv_loss + alpha_rec * rec_loss + alpha_kl * kl
-
-                    self.opt_g.zero_grad()
-                    self.opt_e.zero_grad()
-                    g_loss.backward()
-                    self.opt_g.step()
-                    self.opt_e.step()
-
-                    total_d_loss += d_loss.item()
-                    total_g_loss += g_loss.item()
-                    total_adv_loss += adv_loss.item()
-                    total_rec_loss += rec_loss.item()
-                    total_kl_loss += kl.item()
-
+                total_d_loss += d_loss.item()
+                total_g_loss += g_loss.item()
+                total_adv_loss += adv_loss.item()
+                total_rec_loss += rec_loss.item()
+                total_kl_loss += kl.item()
                 num_batches += 1
+
 
             if num_batches > 0:
                 wandb.log({
@@ -254,9 +237,8 @@ class VAE_CTGAN(nn.Module):
                     "KL_loss": total_kl_loss / num_batches
                 })
 
-            if epoch > 200 and (epoch % 20 or epoch == epochs - 1):
-                torch.save(self.state_dict(), os.path.join(self.checkpoint_dir,f"vae_ctgan_{epoch}epoch.pt"))
-
+            if epoch == epoch-1:
+                torch.save(self.state_dict(), os.path.join(self.checkpoint_dir, f"vae_ctgan_final.pt"))
 
     def sample(self, n):
         steps = n // self.batch_size + 1
@@ -286,9 +268,11 @@ class VAE_CTGAN(nn.Module):
         data_dim = self._transformer.output_dimensions
 
         print(f"cond_dim : {cond_dim}, data_dim : {data_dim}, pac : {self.pac}\n")
+        # ✅ 구조 동일하게 맞춰서 생성
         self.generator = Generator(self.z_dim + cond_dim, data_dim).to(self.device)
         self.discriminator = Discriminator(data_dim + cond_dim, self.pac).to(self.device)
 
+        # 🔐 weight 불러오기
         state_dict = torch.load(path, map_location=self.device)
         self.load_state_dict(state_dict)
         self.eval()
