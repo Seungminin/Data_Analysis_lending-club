@@ -92,7 +92,7 @@ def main():
             data_path=args.preprocessed_path
         )
         df = model.sample(n=540000)
-        df.to_csv(os.path.join(args.sample_dir, "VAE-CTGAN_generated_data_Two_stage.csv"), index=False)
+        df.to_csv(os.path.join(args.sample_dir, "VAE-CTGAN_generated_data_Two_stage_reweight.csv"), index=False)
         print(f"✅ Synthetic data saved to {args.sample_dir}/generated_data.csv")
         print(df.head())
 
