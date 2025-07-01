@@ -254,7 +254,7 @@ class VAE_CTGAN(nn.Module):
                     "KL_loss": total_kl_loss / num_batches
                 })
 
-            if epoch > 200 and (epoch % 20 or epoch == epochs - 1):
+            if epoch > 200 and (epoch % 20 == 0 or epoch == epochs - 1):
                 torch.save(self.state_dict(), os.path.join(self.checkpoint_dir,f"vae_ctgan_{epoch}epoch.pt"))
 
 
