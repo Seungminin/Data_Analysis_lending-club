@@ -130,8 +130,9 @@ class VAE_CTGAN(nn.Module):
 
         self.opt_g = optim.Adam(self.generator.parameters(), lr=self.lr_g, betas=(0.5, 0.9))
         self.opt_d = optim.Adam(self.discriminator.parameters(), lr=self.lr_d, betas=(0.5, 0.9))
-
-        loader = DataLoader(TensorDataset(torch.tensor(data)), batch_size=self.batch_size, shuffle=True)
+        
+        data_tensor = torch.tensor(data, dtype=torch.float32)
+        train_loader = DataLoader(TensorDataset(data_tensor), batch_size=self.batch_size, shuffle=True)
 
         for epoch in tqdm(range(epochs)):
             """
@@ -140,7 +141,9 @@ class VAE_CTGAN(nn.Module):
             adv_loss = 0.5
             kl_loss  = 0.1
             """
-            for real_batch, in loader:
+            batch_iter = tqdm(train_loader, desc=f"Epoch {epoch}", leave=False)
+            
+            for real_batch, in batch_iter:
                 real_batch = real_batch.to(self.device)
                 condvec = self._data_sampler.sample_condvec(real_batch.size(0))
                 if condvec is None: continue
@@ -183,7 +186,7 @@ class VAE_CTGAN(nn.Module):
                     self.opt_e.zero_grad(), self.opt_g.zero_grad()
                     g_loss.backward()
                     self.opt_e.step(), self.opt_g.step()
-                    
+
             if epoch >= warmup_epochs:
                 wandb.log({
                     "epoch": epoch,
