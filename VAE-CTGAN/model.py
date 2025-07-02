@@ -15,7 +15,7 @@ from data_transformer import DataTransformer
 from data_sampler import DataSampler
 
 class CNNEncoder(nn.Module):
-    def __init__(self, latent_dim=64, input_length=209):
+    def __init__(self, latent_dim=64, input_length=214):
         super().__init__()
         self.conv = nn.Sequential(
             nn.Conv1d(1, 32, kernel_size=3, padding=1),
@@ -93,7 +93,7 @@ class VAE_CTGAN(nn.Module):
         self.checkpoint_dir = checkpoint_dir
         self.log_frequency = log_frequency
 
-        self.encoder = CNNEncoder(latent_dim=z_dim, input_length=209).to(device)
+        self.encoder = CNNEncoder(latent_dim=z_dim, input_length=214).to(device)
         self.generator = None
         self.discriminator = None
 
@@ -142,7 +142,7 @@ class VAE_CTGAN(nn.Module):
             kl_loss  = 0.1
             """
             batch_iter = tqdm(train_loader, desc=f"Epoch {epoch}", leave=False)
-            
+
             for real_batch, in batch_iter:
                 real_batch = real_batch.to(self.device)
                 condvec = self._data_sampler.sample_condvec(real_batch.size(0))
