@@ -592,6 +592,7 @@ class CTABGANSynthesizer:
                  num_channels=8,
                  l2scale=1e-5,
                  batch_size=100,
+                 device = None,
                  epochs=1):
                  
         self.random_dim = random_dim
@@ -602,7 +603,7 @@ class CTABGANSynthesizer:
         self.l2scale = l2scale
         self.batch_size = batch_size
         self.epochs = epochs
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.generator = None
         self.transformer = None  # Ensure transformer is initialized here\
         
@@ -708,9 +709,9 @@ class CTABGANSynthesizer:
                 # generating synthetic data as an image
                 fake = self.generator(noisez)
                 # converting it into the tabular domain as per format of the trasformed training data
-                faket = self.Gtransformer.inverse_transform(fake)
+                faket = self.Gtransformer.inverse_transform(fake).to(self.device)
                 # applying final activation on the generated data (i.e., tanh for numeric and gumbel-softmax for categorical)
-                fakeact = apply_activate(faket, self.transformer.output_info)
+                fakeact = apply_activate(faket, self.transformer.output_info).to(self.device)
 
                 # the generated data is then concatenated with the corresponding condition vectors 
                 fake_cat = torch.cat([fakeact, c], dim=1)
@@ -749,8 +750,8 @@ class CTABGANSynthesizer:
 
                 # similarly generating synthetic data and applying final activation
                 fake = self.generator(noisez)
-                faket = self.Gtransformer.inverse_transform(fake)
-                fakeact = apply_activate(faket, self.transformer.output_info)
+                faket = self.Gtransformer.inverse_transform(fake).to(self.device)
+                fakeact = apply_activate(faket, self.transformer.output_info).to(self.device)
                 # concatenating conditional vectors and converting it to the image domain to be fed to the discriminator
                 fake_cat = torch.cat([fakeact, c], dim=1) 
                 fake_cat = self.Dtransformer.transform(fake_cat)
@@ -804,8 +805,8 @@ class CTABGANSynthesizer:
                     optimizerG.zero_grad()
                     # generate synthetic data and apply the final activation
                     fake = self.generator(noisez)
-                    faket = self.Gtransformer.inverse_transform(fake)
-                    fakeact = apply_activate(faket, self.transformer.output_info)
+                    faket = self.Gtransformer.inverse_transform(fake).to(self.device)
+                    fakeact = apply_activate(faket, self.transformer.output_info).to(self.device)
                     # computing classifier's target column predictions on the fake data along with returning corresponding true labels
                     fake_pre, fake_label = classifier(fakeact)
                     if (st_ed[1] - st_ed[0])==2:
