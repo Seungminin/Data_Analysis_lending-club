@@ -32,5 +32,9 @@ tablegan/logs/
 wandb/
 tablegan/wandb/
 
+#ctab-gan 생략
+*.pyc
+*.DS_Store
+
 
 
