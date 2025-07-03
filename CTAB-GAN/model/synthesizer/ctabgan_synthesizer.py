@@ -9,6 +9,7 @@ from torch.nn import (Dropout, LeakyReLU, Linear, Module, ReLU, Sequential,
 Conv2d, ConvTranspose2d, BatchNorm2d, Sigmoid, init, BCELoss, CrossEntropyLoss,SmoothL1Loss)
 from model.synthesizer.transformer import ImageTransformer,DataTransformer
 from tqdm import tqdm
+import wandb
 
 
 def random_choice_prob_index_sampling(probs,col_idx):
@@ -285,7 +286,16 @@ class Sampler(object):
         
         # sampling a data record index randomly from all possible indices that meet the given criteria of the chosen category and one-hot-encoding
         for c, o in zip(col, opt):
-            idx.append(np.random.choice(self.model[c][o]))
+            try:
+                candidates = self.model[c][o]
+                if len(candidates) == 0:
+                    wandb.log({"empty_sample": f"col={c}, opt={o}"})
+                    raise ValueError(f"⚠️ Empty sample at column {c}, option {o}")
+                idx.append(np.random.choice(candidates))
+            except Exception as e:
+                print(e)
+                # fallback: 아무거나 랜덤하게 선택
+                idx.append(np.random.choice(np.arange(self.n)))
         
         return self.data[idx]
 
@@ -684,9 +694,8 @@ class CTABGANSynthesizer:
         # initiating the training by computing the number of iterations per epoch
         steps_per_epoch = max(1, len(train_data) // self.batch_size)
 
-        for i in tqdm(range(self.epochs)):
-            for _ in range(steps_per_epoch):
-                
+        for i in tqdm(range(self.epochs), desc="Epoch"):
+            for _ in tqdm(range(steps_per_epoch), desc=f"Epoch {i}", leave=False):
                 # sampling noise vectors using a standard normal distribution 
                 noisez = torch.randn(self.batch_size, self.random_dim, device=self.device)
                 # sampling conditional vectors 
@@ -779,7 +788,7 @@ class CTABGANSynthesizer:
                 loss_info.backward()
                 # executing the backward step to update the weights
                 optimizerG.step()
-
+            
                 # the classifier module is used in case there is a target column associated with ML tasks 
                 if problem_type:
                     
@@ -815,6 +824,17 @@ class CTABGANSynthesizer:
                     loss_cg = c_loss(fake_pre, fake_label)
                     loss_cg.backward()
                     optimizerG.step()
+                    wandb.log({
+                        "loss_classifier_real": loss_cc.item(),
+                        "loss_classifier_fake": loss_cg.item()
+                    })
+
+            wandb.log({
+                "epoch": i,
+                "loss_d": loss_d.item(),
+                "loss_g": g.item(),
+                "loss_info": loss_info.item()
+            })
                     
                             
     def sample(self, num_samples, fraud_types: list):        

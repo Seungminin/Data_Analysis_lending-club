@@ -3,7 +3,7 @@ import time
 import numpy as np
 from scipy import stats
 import tqdm
-
+import wandb
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -34,7 +34,7 @@ class CTABGAN():
                      'revol_util': [0.0]
                  },
                  integer_columns=[
-                     'credit_history_years', 'term_months', 'loan_status'
+                     'credit_history_years', 'term_months'
                  ],
                  problem_type={"Classification": 'loan_status'},
                  epochs=300):
@@ -52,6 +52,12 @@ class CTABGAN():
         self.problem_type = problem_type
 
     def fit(self):
+        wandb.init(project="CTABGAN", name=f"ctabgan_{int(time.time())}", config={
+        "epochs": self.synthesizer.epochs,
+        "batch_size": self.synthesizer.batch_size,
+        "random_dim": self.synthesizer.random_dim,
+        "device": str(self.device)
+    })
         start_time = time.time()
         self.data_prep = DataPrep(
             self.raw_df,
