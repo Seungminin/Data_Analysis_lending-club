@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 def load_processed_data(path='./preprocess/processed.csv'):
-    print(f"📄 Loading processed data from {path}...")
+    print(f"Loading processed data from {path}...")
     return pd.read_csv(path).astype(np.float32).values
 
 

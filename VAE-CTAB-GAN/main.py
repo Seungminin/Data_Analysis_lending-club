@@ -44,7 +44,7 @@ def main():
     cont_data = extract_continuous_features(data)
 
     if args.mode == "generate":
-        print("🚧 [TODO] Generation logic not implemented yet.")
+        print("[TODO] Generation logic not implemented yet.")
         return
 
     wandb.init(project=args.wandb_project, name=args.wandb_run, config=vars(args))
@@ -55,7 +55,7 @@ def main():
     discriminator = Discriminator(input_dim=data.shape[1]).to(device)
 
     if args.mode in ["train", "only_train"]:
-        print("🚀 Starting training...")
+        print("Starting training")
         train_vae_gan(
             encoder=encoder,
             generator=generator,
