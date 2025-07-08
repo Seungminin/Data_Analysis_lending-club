@@ -38,6 +38,7 @@ class DataPrep(object):
         self.column_types["mixed"] = {}
         self.lower_bounds = {}
         self.label_encoder_list = []
+        self.problem_type = type
 
         # Spliting the input data to obtain training dataset
         target_col = list(type.values())[0]
