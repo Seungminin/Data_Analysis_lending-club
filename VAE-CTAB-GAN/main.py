@@ -5,9 +5,9 @@ import torch
 import wandb
 
 from preprocess import preprocess_data
-from data_utils import load_processed_data, extract_continuous_features
-from train_loop import train_vae_gan
-from model import VAEEncoder, Generator, Discriminator
+from model.pipeline.data_utils import load_processed_data, extract_continuous_features
+from model.train_loop import train_vae_gan
+from model.model import VAEEncoder, Generator, Discriminator
 
 
 def parse_args():
@@ -38,7 +38,7 @@ def main():
     # Load processed data
     processed_path = "./preprocess/processed.csv"
     if not os.path.exists(processed_path):
-        raise FileNotFoundError("🛑 Processed CSV not found. Run with --mode preprocess first.")
+        raise FileNotFoundError("Processed CSV not found. Run with --mode preprocess first.")
 
     data = load_processed_data(processed_path)
     cont_data = extract_continuous_features(data)

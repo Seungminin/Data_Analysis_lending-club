@@ -2,7 +2,7 @@
 import os
 import pandas as pd
 from model.pipeline.data_preparation import DataPrep
-from transformer import DataTransformer
+from model.pipeline.transformer import DataTransformer
 
 def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
                     categorical_columns=[
