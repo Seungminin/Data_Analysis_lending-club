@@ -1,22 +1,28 @@
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 import wandb
 import os
-
+import numpy as np
+from tqdm import tqdm
+from model.pipeline.inverse_transform import apply_activate
+from model.synthesizer.transformer import ImageTransformer
+from model.condvec import Condvec
+from model.sampler import Sampler
+from model.synthesizer.transformer import DataTransformer
+import pickle
+import pandas as pd
+from model.model import CTABClassifier
 
 def kl_divergence(mu, logvar):
     return -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
 
-
 def compute_gradient_penalty(D, real_samples, fake_samples, device):
-    alpha = torch.rand(real_samples.size(0), 1).to(device)
-    alpha = alpha.expand(real_samples.size())
+    alpha = torch.rand(real_samples.size(0), 1, 1, 1).to(device)
     interpolates = (alpha * real_samples + ((1 - alpha) * fake_samples)).requires_grad_(True)
     d_interpolates = D(interpolates)
-    fake = torch.ones(d_interpolates.size()).to(device)
+    fake = torch.ones_like(d_interpolates).to(device)
     gradients = torch.autograd.grad(
         outputs=d_interpolates,
         inputs=interpolates,
@@ -29,8 +35,21 @@ def compute_gradient_penalty(D, real_samples, fake_samples, device):
     gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
     return gradient_penalty
 
-
 def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args, device):
+    transformer = DataTransformer()
+    transformer.output_info = args.output_info
+    transformer.output_dim = full_data.shape[1]
+
+    cond_generator = Condvec(full_data, transformer.output_info)
+    sampler = Sampler(full_data, transformer.output_info)
+
+    image_size = int(np.ceil(np.sqrt(full_data.shape[1] + cond_generator.n_opt)))
+    G_transformer = ImageTransformer(image_size)
+    D_transformer = ImageTransformer(image_size)
+
+    classifier = CTABClassifier().to(device)
+    optimizerC = torch.optim.Adam(classifier.parameters(), lr=args.lr)
+
     dataset = TensorDataset(torch.tensor(full_data, dtype=torch.float32),
                             torch.tensor(cont_data, dtype=torch.float32))
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
@@ -39,37 +58,59 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
     optimizerG = torch.optim.Adam(generator.parameters(), lr=args.lr)
     optimizerD = torch.optim.Adam(discriminator.parameters(), lr=args.lr)
 
-    os.makedirs("./checkpoints", exist_ok=True)
+    os.makedirs(args.checkpoint_dir, exist_ok=True)
 
-    for epoch in range(args.epochs):
+    for epoch in tqdm(range(args.epochs), desc = "Epoch"):
         for step, (x_full, x_cont) in enumerate(loader):
             x_full = x_full.to(device)
             x_cont = x_cont.to(device)
 
-            # === Train Discriminator ===
+            c, m, col, opt = cond_generator.sample_train(args.batch_size)
+            c = torch.from_numpy(c).to(device)
+
             z, mu, logvar = encoder(x_cont)
-            fake_data = generator(torch.cat([z], dim=1)).detach()
-            real_validity = discriminator(x_full)
-            fake_validity = discriminator(fake_data)
-            gp = compute_gradient_penalty(discriminator, x_full.data, fake_data.data, device)
+            input_gen = torch.cat([z, c], dim=1)
+            fake_image = generator(input_gen).detach()
+            fake_tabular = G_transformer.inverse_transform(fake_image)
+            fake_activated = apply_activate(fake_tabular, transformer.output_info)
+
+            real_data = torch.from_numpy(sampler.sample(args.batch_size, col, opt)).to(device)
+            real_cat = torch.cat([real_data, c], dim=1)
+            fake_cat = torch.cat([fake_activated, c], dim=1)
+
+            real_image = D_transformer.transform(real_cat)
+            fake_image_d = D_transformer.transform(fake_cat)
+
+            real_validity = discriminator(real_image)
+            fake_validity = discriminator(fake_image_d)
+            gp = compute_gradient_penalty(discriminator, real_image.data, fake_image_d.data, device)
             d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + 10 * gp
 
             optimizerD.zero_grad()
             d_loss.backward()
             optimizerD.step()
 
-            # === Train Generator & VAE ===
+            # Train Generator, Encoder, Classifier
             z, mu, logvar = encoder(x_cont)
-            fake_data = generator(torch.cat([z], dim=1))
-            g_loss = -torch.mean(discriminator(fake_data))
+            input_gen = torch.cat([z, c], dim=1)
+            fake_image = generator(input_gen)
+            fake_tabular = G_transformer.inverse_transform(fake_image)
+            fake_activated = apply_activate(fake_tabular, transformer.output_info)
+            fake_cat = torch.cat([fake_activated, c], dim=1)
+            fake_image_d = D_transformer.transform(fake_cat)
+
+            g_loss = -torch.mean(discriminator(fake_image_d))
             kl_loss = kl_divergence(mu, logvar)
-            total_loss = args.g_weight * g_loss + args.kl_weight * kl_loss
+            advcls_loss = F.cross_entropy(classifier(fake_image_d), torch.argmax(c, dim=1))
+            total_loss = args.g_weight * g_loss + args.kl_weight * kl_loss + advcls_loss
 
             optimizerG.zero_grad()
             optimizerE.zero_grad()
+            optimizerC.zero_grad()
             total_loss.backward()
             optimizerG.step()
             optimizerE.step()
+            optimizerC.step()
 
             if step % 100 == 0:
                 wandb.log({
@@ -78,13 +119,52 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                     "d_loss": d_loss.item(),
                     "g_loss": g_loss.item(),
                     "kl_loss": kl_loss.item(),
+                    "advcls_loss": advcls_loss.item(),
                     "total_loss": total_loss.item()
                 })
-                print(f"[Epoch {epoch}/{args.epochs}] [Step {step}] D: {d_loss.item():.4f}, G: {g_loss.item():.4f}, KL: {kl_loss.item():.4f}")
+                print(f"[Epoch {epoch}/{args.epochs}] [Step {step}] D: {d_loss.item():.4f}, G: {g_loss.item():.4f}, KL: {kl_loss.item():.4f}, ADVCLS: {advcls_loss.item():.4f}")
 
-        # Save checkpoint every epoch
         torch.save({
             'encoder': encoder.state_dict(),
             'generator': generator.state_dict(),
-            'discriminator': discriminator.state_dict()
-        }, f"./checkpoints/vae_ctabgan_epoch{epoch}.pth")
+            'discriminator': discriminator.state_dict(),
+            'classifier': classifier.state_dict()
+        }, os.path.join(args.checkpoint_dir, f"vae_ctabgan_epoch{epoch}.pth"))
+
+def generate_samples(args, full_data, cont_data, device):
+    with open(args.transformer_path, 'rb') as f:
+        transformer = pickle.load(f)
+    output_info = transformer.output_info
+
+    condvec = Condvec(full_data, output_info)
+    image_size = int(np.ceil(np.sqrt(full_data.shape[1] + condvec.n_opt)))
+    transformer_G = ImageTransformer(image_size)
+
+    from model.model import VAEEncoder, CTABGenerator
+    encoder = VAEEncoder(input_dim=cont_data.shape[1], latent_dim=args.latent_dim).to(device)
+    generator = CTABGenerator(latent_dim=args.latent_dim + condvec.n_opt).to(device)
+
+    checkpoint_path = os.path.join(args.checkpoint_dir, args.save_name)
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    encoder.load_state_dict(checkpoint['encoder'])
+    generator.load_state_dict(checkpoint['generator'])
+    encoder.eval()
+    generator.eval()
+
+    samples = []
+    batch_size = args.batch_size
+    for _ in range((args.num_samples + batch_size - 1) // batch_size):
+        c, _, _, _ = condvec.sample_train(batch_size)
+        c = torch.from_numpy(c).to(device)
+        z = torch.randn((batch_size, args.latent_dim)).to(device)
+        input_gen = torch.cat([z, c], dim=1)
+        with torch.no_grad():
+            fake_image = generator(input_gen)
+            fake_tabular = transformer_G.inverse_transform(fake_image)
+            fake_activated = apply_activate(fake_tabular, output_info)
+            samples.append(fake_activated.cpu().numpy())
+
+    final_samples = np.concatenate(samples, axis=0)[:args.num_samples]
+    output_path = os.path.join(args.sample_dir, "generated_samples.csv")
+    pd.DataFrame(final_samples).to_csv(output_path, index=False)
+    print(f"✅ Generated {args.num_samples} samples and saved to {output_path}")
