@@ -121,18 +121,26 @@ class DataPrep(object):
             for i in df_sample:
                 if i in self.log_columns:
                     lower_bound = self.lower_bounds[i]
-                    if lower_bound>0:
-                        df_sample[i].apply(lambda x: np.exp(x) if x!=-9999999 else -9999999) 
-                    elif lower_bound==0:
-                        df_sample[i] = df_sample[i].apply(lambda x: np.ceil(np.exp(x)-eps) if ((x!=-9999999) & ((np.exp(x)-eps) < 0)) else (np.exp(x)-eps if x!=-9999999 else -9999999))
-                    else: 
+                    if lower_bound > 0:
+                        df_sample[i] = df_sample[i].apply(lambda x: np.exp(x) if x!=-9999999 else -9999999)
+                    elif lower_bound == 0:
+                        df_sample[i] = df_sample[i].apply(lambda x: np.ceil(np.exp(x)-eps) if ((x!=-9999999) and ((np.exp(x)-eps) < 0)) else (np.exp(x)-eps if x!=-9999999 else -9999999))
+                    else:
                         df_sample[i] = df_sample[i].apply(lambda x: np.exp(x)-eps+lower_bound if x!=-9999999 else -9999999)
+
         
         # Rounding numeric columns without floating numbers in the original dataset
         if self.integer_columns:
             for column in self.integer_columns:
-                df_sample[column]= (np.round(df_sample[column].values))
-                df_sample[column] = df_sample[column].astype(int)
+                try:
+                    df_sample[column] = pd.to_numeric(df_sample[column], errors='coerce')
+                    df_sample[column] = df_sample[column].round().astype('int64')
+                except Exception as e:
+                    print(f"[!] Failed to round column '{column}': {e}")
+
+        target_col = list(self.problem_type.values())[0] if self.problem_type else None
+        if target_col in df_sample.columns:
+            df_sample[target_col] = pd.to_numeric(df_sample[target_col], errors='coerce').round().astype('int64')
 
         # Converting back -9999999 and "empty" to na
         df_sample.replace(-9999999, np.nan,inplace=True)
