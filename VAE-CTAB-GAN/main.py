@@ -57,7 +57,7 @@ def main():
     cont_data = extract_continuous_features(data, transformer_path=args.transformer_path)
 
     if args.mode == "generate":
-        print("✨ Generating synthetic samples via generate_samples()...")
+        print("✨ Generating synthetic samples via generate_samples()....")
         generate_samples(
             args=args,
             full_data=data,
@@ -69,9 +69,9 @@ def main():
     wandb.init(project=args.wandb_project, name=args.wandb_run, config=vars(args))
 
     encoder = VAEEncoder(input_dim=cont_data.shape[1], latent_dim=args.latent_dim).to(device)
-    generator = CTABGenerator(latent_dim=args.latent_dim).to(device)
-    discriminator = CTABDiscriminator(input_dim=data.shape[1]).to(device)
-    classifier = CTABClassifier()
+    generator = Generator(latent_dim=args.latent_dim).to(device)
+    discriminator = Discriminator(input_dim=data.shape[1]).to(device)
+    classifier = Classifier()
 
     model = VAE_CTABGAN(
         embedding_dim=args.embedding_dim,
