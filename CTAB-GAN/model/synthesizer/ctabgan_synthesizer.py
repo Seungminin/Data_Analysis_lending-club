@@ -11,6 +11,8 @@ from model.synthesizer.transformer import ImageTransformer,DataTransformer
 from tqdm import tqdm
 import wandb
 
+import os 
+
 
 def random_choice_prob_index_sampling(probs,col_idx):
     
@@ -835,7 +837,16 @@ class CTABGANSynthesizer:
                 "loss_g": g.item(),
                 "loss_info": loss_info.item()
             })
-                    
+
+            if (i+1) % 20 == 0:
+                os.makedirs("./checkpoints", exist_ok=True)
+                save_path = f"./checkpoints/ctabgan_epoch_{i+1}.pt"
+                torch.save({
+                    'epoch': i+1,
+                    "generator_state_dict" : self.generator.state_dict(), 
+                }, save_path)
+                print(f"saved checkpoint at epoch {i+1} -> {save_path}")
+                
                             
     def sample(self, num_samples, fraud_types: list):        
         self.generator.eval()
