@@ -9,8 +9,12 @@ import numpy as np
 from model.preprocess import preprocess_data
 from model.pipeline.data_utils import load_processed_data, extract_continuous_features
 from model.train_loop import train_vae_gan, generate_samples
-from model.model import VAEEncoder, Generator, Discriminator, Classifier, VAE_CTABGAN
+from model.model import VAEEncoder, CTABGenerator, Discriminator, CTABClassifier
 from model.pipeline.data_utils import show_all_parameters
+from model.sampler import Sampler
+from model.condvec import Condvec
+from model.synthesizer.transformer import DataTransformer
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="VAE-CTAB-GAN")
@@ -24,6 +28,7 @@ def parse_args():
     parser.add_argument("--latent_dim", type=int, default=64, help="Latent dimension for VAE")
     parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
     parser.add_argument("--kl_weight", type=float, default=0.01, help="KL loss weight")
+    parser.add_argument("--recon_weight", type=float, default=1.0, help="Weight for reconstruction loss")
     parser.add_argument("--g_weight", type=float, default=1.0, help="Generator loss weight")
     parser.add_argument("--wandb_project", type=str, default="vae-ctab-gan", help="wandb project name")
     parser.add_argument("--wandb_run", type=str, default="joint-training", help="wandb run name")
@@ -36,6 +41,7 @@ def parse_args():
     parser.add_argument('--num_samples', type=int, default=540000, help='Number of samples to generate')
     return parser.parse_args()
 
+
 def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -45,23 +51,30 @@ def main():
     os.makedirs(os.path.dirname(args.preprocessed_path), exist_ok=True)
 
     if args.mode == "preprocess":
-        print("🔄 Preprocessing original data...")
+        print("\U0001F504 Preprocessing original data...")
         preprocess_data()
         return
 
     if not os.path.exists(args.preprocessed_path):
         raise FileNotFoundError("Processed CSV not found. Run with --mode preprocess first.")
 
-    print("📥 Loading processed data...")
+    print("\U0001F4E5 Loading processed data...")
     data = load_processed_data(args.preprocessed_path)
     cont_data = extract_continuous_features(data, transformer_path=args.transformer_path)
 
+    with open(args.transformer_path, 'rb') as f:
+        transformer = pickle.load(f)
+        args.output_info = transformer.output_info
+
+    condvec = Condvec(data.values, transformer.output_info, device=device)
+    sampler = Sampler(data.values, transformer.output_info, device=device)
+
     if args.mode == "generate":
-        print("✨ Generating synthetic samples via generate_samples()....")
+        print("\u2728 Generating synthetic samples via generate_samples()....")
         generate_samples(
             args=args,
-            full_data=data,
-            cont_data=cont_data,
+            full_data=data.values,
+            cont_data=cont_data.values,
             device=device
         )
         return
@@ -69,30 +82,30 @@ def main():
     wandb.init(project=args.wandb_project, name=args.wandb_run, config=vars(args))
 
     encoder = VAEEncoder(input_dim=cont_data.shape[1], latent_dim=args.latent_dim).to(device)
-    generator = Generator(latent_dim=args.latent_dim).to(device)
+    generator = CTABGenerator(latent_dim=args.latent_dim + condvec.n_opt).to(device)
     discriminator = Discriminator(input_dim=data.shape[1]).to(device)
-    classifier = Classifier()
+    classifier = CTABClassifier().to(device)
 
-    model = VAE_CTABGAN(
-        embedding_dim=args.embedding_dim,
-        z_dim=args.z_dim,
-        device=device,
-        batch_size=args.batch_size,
-        lr=args.lr,
-        sample_dir=args.sample_dir,
-        checkpoint_dir=args.checkpoint_dir,
-    )
+    model_components = {
+        'encoder': encoder,
+        'generator': generator,
+        'discriminator': discriminator,
+        'classifier': classifier
+    }
 
-    show_all_parameters(model)
+    show_all_parameters(encoder)
+    show_all_parameters(generator)
+    show_all_parameters(discriminator)
+    show_all_parameters(classifier)
 
     if args.mode in ["train", "only_train"]:
-        print(" Starting training...")
+        print("\u2728 Starting training...")
         train_vae_gan(
             encoder=encoder,
             generator=generator,
             discriminator=discriminator,
-            full_data=data,
-            cont_data=cont_data,
+            full_data=data.values,
+            cont_data=cont_data.values,
             args=args,
             device=device
         )

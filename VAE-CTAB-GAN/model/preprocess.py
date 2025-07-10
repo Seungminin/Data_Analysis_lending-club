@@ -25,7 +25,7 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
                     test_ratio=0.20,
                     save_path='./preprocess/processed.csv'):
 
-    print("📂 Loading and processing raw dataset...")
+    print(" Loading and processing raw dataset...")
     df = pd.read_csv(raw_path)
 
     prep = DataPrep(df, categorical_columns, log_columns, mixed_columns, integer_columns, problem_type, test_ratio)
@@ -37,13 +37,14 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
     transformer.fit()
     transformed = transformer.transform(transformed_df.values)
 
-    # Save processed CSV
+    for item in transformer.output_info:
+        print(item)
+        
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     pd.DataFrame(transformed).to_csv(save_path, index=False)
-    print(f"✅ Saved processed data to {save_path}")
+    print(f" Saved processed data to {save_path}")
 
-    # Save transformer
     os.makedirs('./preprocess/transformer', exist_ok=True)
     with open('./preprocess/transformer/transformer.pkl', 'wb') as f:
         pickle.dump(transformer, f)
-    print("🧠 Saved transformer to ./preprocess/transformer/transformer.pkl")
+    print(" Saved transformer to ./preprocess/transformer/transformer.pkl")
