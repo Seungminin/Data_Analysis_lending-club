@@ -38,82 +38,155 @@ def random_choice_prob_index_sampling(probs,col_idx):
     
     return np.array(option_list).reshape(col_idx.shape)
 
-class Condvec:
-    def __init__(self, data, output_info, device=None):
-        self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+class Condvec(object):
+    
+    """
+    This class is responsible for sampling conditional vectors to be supplied to the generator
+
+    Variables:
+    1) model -> list containing an index of highlighted categories in their corresponding one-hot-encoded represenations
+    2) interval -> an array holding the respective one-hot-encoding starting positions and sizes     
+    3) n_col -> total no. of one-hot-encoding representations
+    4) n_opt -> total no. of distinct categories across all one-hot-encoding representations
+    5) p_log_sampling -> list containing log of probability mass distribution of categories within their respective one-hot-encoding representations
+    6) p_sampling -> list containing probability mass distribution of categories within their respective one-hot-encoding representations
+
+    Methods:
+    1) __init__() -> takes transformed input data with respective column information to compute class variables
+    2) sample_train() -> used to sample the conditional vector during training of the model
+    3) sample() -> used to sample the conditional vector for generating data after training is finished
+    
+    """
+
+
+    def __init__(self, data, output_info):
+        
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = []
         self.interval = []
-        self.n_col = 0
-        self.n_opt = 0
-        self.p_log_sampling = []
-        self.p_sampling = []
-
+        self.n_col = 0  
+        self.n_opt = 0 
+        self.p_log_sampling = []  
+        self.p_sampling = [] 
+        
+        # iterating through the transformed input data columns 
         st = 0
         for item in output_info:
+            # ignoring columns that do not represent one-hot-encodings
             if item[1] == 'tanh':
                 st += item[0]
                 continue
             elif item[1] == 'softmax':
+                # using starting (st) and ending (ed) position of any given one-hot-encoded representation to obtain relevant information
                 ed = st + item[0]
                 self.model.append(np.argmax(data[:, st:ed], axis=-1))
                 self.interval.append((self.n_opt, item[0]))
                 self.n_col += 1
                 self.n_opt += item[0]
-                freq = np.sum(data[:, st:ed], axis=0)
-                log_freq = np.log(freq + 1)
-                self.p_log_sampling.append(torch.tensor(log_freq / np.sum(log_freq), dtype=torch.float32, device=self.device))
-                self.p_sampling.append(torch.tensor(freq / np.sum(freq), dtype=torch.float32, device=self.device))
+                freq = np.sum(data[:, st:ed], axis=0)  
+                log_freq = np.log(freq + 1)  
+                log_pmf = log_freq / np.sum(log_freq)
+                self.p_log_sampling.append(log_pmf)
+                pmf = freq / np.sum(freq)
+                self.p_sampling.append(pmf)
                 st = ed
-
-        self.interval = torch.tensor(self.interval, device=self.device)
-
+           
+        self.interval = np.asarray(self.interval)
+        
     def sample_train(self, batch):
+        
+        """
+        Used to create the conditional vectors for feeding it to the generator during training
+
+        Inputs:
+        1) batch -> no. of data records to be generated in a batch
+
+        Outputs:
+        1) vec -> a matrix containing a conditional vector for each data point to be generated 
+        2) mask -> a matrix to identify chosen one-hot-encodings across the batch
+        3) idx -> list of chosen one-hot encoding across the batch
+        4) opt1prime -> selected categories within chosen one-hot-encodings
+
+        """
+
         if self.n_col == 0:
             return None
+        batch = batch
+        
+        # each conditional vector in vec is a one-hot vector used to highlight a specific category across all possible one-hot-encoded representations 
+        # (i.e., including modes of continuous and mixed columns)
+        vec = np.zeros((batch, self.n_opt), dtype='float32')
 
-        vec = torch.zeros((batch, self.n_opt), dtype=torch.float32, device=self.device)
-        mask = torch.zeros((batch, self.n_col), dtype=torch.float32, device=self.device)
-        idx = torch.randint(0, self.n_col, (batch,), device=self.device)
-        mask[torch.arange(batch, device=self.device), idx] = 1
+        # choosing one specific one-hot-encoding from all possible one-hot-encoded representations 
+        idx = np.random.choice(np.arange(self.n_col), batch)
 
-        opt1prime = torch.empty(batch, dtype=torch.long, device=self.device)
-        for i in range(batch):
-            p = self.p_log_sampling[idx[i]] + 1e-6
-            p = p / torch.sum(p)
-            opt1prime[i] = torch.multinomial(p, 1).item()
-
-        for i in range(batch):
-            start = self.interval[idx[i], 0]
-            vec[i, start + opt1prime[i]] = 1
-
+        # matrix of shape (batch x total no. of one-hot-encoded representations) with 1 in indexes of chosen representations and 0 elsewhere
+        mask = np.zeros((batch, self.n_col), dtype='float32')
+        mask[np.arange(batch), idx] = 1  
+        
+        # producing a list of selected categories within each of selected one-hot-encoding representation
+        opt1prime = random_choice_prob_index_sampling(self.p_log_sampling,idx) 
+        
+        # assigning the appropriately chosen category for each corresponding conditional vector
+        for i in np.arange(batch):
+            vec[i, self.interval[idx[i], 0] + opt1prime[i]] = 1
+            
         return vec, mask, idx, opt1prime
 
     def sample(self, batch, fraud_type=None):
+        
+        """
+        Used to create the conditional vectors for feeding it to the generator after training is finished
+
+        Inputs:
+        1) batch -> no. of data records to be generated in a batch
+
+        Outputs:
+        1) vec -> an array containing a conditional vector for each data point to be generated 
+        """
+
         if self.n_col == 0:
             return None
+        
+        batch = batch
 
-        vec = torch.zeros((batch, self.n_opt), dtype=torch.float32, device=self.device)
-
+        # each conditional vector in vec is a one-hot vector used to highlight a specific category across all possible one-hot-encoded representations 
+        # (i.e., including modes of continuous and mixed columns)
+        vec = np.zeros((batch, self.n_opt), dtype='float32')
+        
         if fraud_type is not None:
-            idx = torch.full((batch,), self.get_fraud_type_index(fraud_type), dtype=torch.long, device=self.device)
+            fraud_type_idx = self.get_fraud_type_index(fraud_type)
+
+            idx = np.full(batch, fraud_type_idx)
         else:
-            idx = torch.randint(0, self.n_col, (batch,), device=self.device)
+             # choosing one specific one-hot-encoding from all possible one-hot-encoded representations 
+            idx = np.random.choice(np.arange(self.n_col), batch)
 
-        for i in range(batch):
-            p = self.p_sampling[idx[i]] + 1e-6
-            p = p / torch.sum(p)
-            sampled = torch.multinomial(p, 1).item()
-            start = self.interval[idx[i], 0]
-            vec[i, start + sampled] = 1
-
-        return vec.cpu().numpy()  # still returning numpy for now
+        # producing a list of selected categories within each of selected one-hot-encoding representation
+        opt1prime = random_choice_prob_index_sampling(self.p_sampling,idx)
+        
+        # assigning the appropriately chosen category for each corresponding conditional vector
+        for i in np.arange(batch):   
+            vec[i, self.interval[idx[i], 0] + opt1prime[i]] = 1
+            
+        return vec
     def get_fraud_type_index(self, fraud_type):
-        mapping = {
-            "a": 0, "b": 1, "c": 2, "d": 3, "e": 4, "f": 5,
-            "g": 6, "h": 7, "i": 8, "j": 9, "k": 10, "l": 11, "m": 12
+        fraud_type_mapping = {
+            "a": 0,
+            "b": 1,
+            "c": 2,
+            "d": 3,
+            "e": 4,
+            "f": 5,
+            "g": 6,
+            "h": 7,
+            "i": 8,
+            "j": 9,
+            "k": 10,
+            "l": 11,
+            "m": 12,
         }
-        return mapping.get(fraud_type, 0)
-
+        return fraud_type_mapping.get(fraud_type, 0)
 
 def cond_loss(data, output_info, c, m):
     
@@ -161,46 +234,73 @@ def cond_loss(data, output_info, c, m):
 
     return loss
 
-class Sampler:
-    def __init__(self, data, output_info, device=None):
-        self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.data = torch.tensor(data, dtype=torch.float32, device=self.device)
-        self.n = len(data)
-        self.model = []
+class Sampler(object):
+    
+    """
+    This class is used to sample the transformed real data according to the conditional vector 
 
+    Variables:
+    1) data -> real transformed input data
+    2) model -> stores the index values of data records corresponding to any given selected categories for all columns
+    3) n -> size of the input data
+
+    Methods:
+    1) __init__() -> initiates the sampler object and stores class variables 
+    2) sample() -> takes as input the number of rows to be sampled (n), chosen column (col)
+                   and category within the column (opt) to sample real records accordingly
+    """
+
+    def __init__(self, data, output_info):
+        
+        super(Sampler, self).__init__()
+        
+        self.data = data
+        self.model = []
+        self.n = len(data)
+        
+        # counter to iterate through columns
         st = 0
+        # iterating through column information
         for item in output_info:
+            # ignoring numeric columns
             if item[1] == 'tanh':
                 st += item[0]
                 continue
+            # storing indices of data records for all categories within one-hot-encoded representations
             elif item[1] == 'softmax':
                 ed = st + item[0]
                 tmp = []
+                # iterating through each category within a one-hot-encoding
                 for j in range(item[0]):
-                    tmp.append(torch.nonzero(self.data[:, st + j]).squeeze(1))
+                    # storing the relevant indices of data records for the given categories
+                    tmp.append(np.nonzero(data[:, st + j])[0])
                 self.model.append(tmp)
                 st = ed
-
+                
     def sample(self, n, col, opt):
+        
+        # if there are no one-hot-encoded representations, we may ignore sampling using a conditional vector
         if col is None:
-            idx = torch.randint(0, self.n, (n,), device=self.device)
-            return self.data[idx].cpu().numpy()
-
-        sample_indices = []
+            idx = np.random.choice(np.arange(self.n), n)
+            return self.data[idx]
+        
+        # used to store relevant indices of data records based on selected category within a chosen one-hot-encoding
+        idx = []
+        
+        # sampling a data record index randomly from all possible indices that meet the given criteria of the chosen category and one-hot-encoding
         for c, o in zip(col, opt):
             try:
                 candidates = self.model[c][o]
                 if len(candidates) == 0:
-                    raise IndexError("No candidates found.")
-                idx = torch.randint(0, len(candidates), (1,), device=self.device).item()
-                sample_indices.append(candidates[idx].item())
-            except (IndexError, RuntimeError):
-                fallback = torch.randint(0, self.n, (1,), device=self.device).item()
-                sample_indices.append(fallback)
-
-        return self.data[sample_indices].cpu().numpy()
-
-
+                    wandb.log({"empty_sample": f"col={c}, opt={o}"})
+                    raise ValueError(f"⚠️ Empty sample at column {c}, option {o}")
+                idx.append(np.random.choice(candidates))
+            except Exception as e:
+                print(e)
+                # fallback: 아무거나 랜덤하게 선택
+                idx.append(np.random.choice(np.arange(self.n)))
+        
+        return self.data[idx]
 
 def get_st_ed(target_col_index,output_info):
     
@@ -519,25 +619,6 @@ class CTABGANSynthesizer:
         self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.generator = None
         self.transformer = None  # Ensure transformer is initialized here\
-    
-    def _build_generator_only(self):
-        """
-        Used for sample-only mode (e.g., --generate): initialize only the generator 
-        using self.output_info and self.cond_generator.
-        """
-        data_dim = self.transformer.output_dim
-        sides = [64, 128, 256, 512]
-        col_size_g = data_dim
-        for i in sides:
-            if i * i >= col_size_g:
-                self.gside = i
-                break
-        else:
-            raise ValueError(f"Data dimension too high for given sides: {col_size_g}")
-        
-        layers_G = determine_layers_gen(self.gside, self.random_dim + self.cond_generator.n_opt, self.num_channels)
-        self.generator = Generator(layers_G).to(self.device)
-        self.Gtransformer = ImageTransformer(self.gside)
 
     def fit(self, train_data, transformer, condvec, sampler, output_info, problem_type=None, target_index=None):
         self.transformer = transformer
@@ -594,10 +675,8 @@ class CTABGANSynthesizer:
             for _ in tqdm(range(steps_per_epoch), desc=f"Epoch {i}", leave=False):
                 noisez = torch.randn(self.batch_size, self.random_dim, device=self.device)
                 c, m, col, opt = self.cond_generator.sample_train(self.batch_size)
-                c = c if isinstance(c, torch.Tensor) else torch.from_numpy(c)
-                c = c.to(self.device)
-                m = m if isinstance(m, torch.Tensor) else torch.from_numpy(m)
-                m = m.to(self.device)
+                c = torch.from_numpy(c).to(self.device)
+                m = torch.from_numpy(m).to(self.device)
                 noisez = torch.cat([noisez, c], dim=1).view(self.batch_size, -1, 1, 1)
 
                 perm = np.arange(self.batch_size)
@@ -623,10 +702,9 @@ class CTABGANSynthesizer:
                 optimizerD.step()
 
                 noisez = torch.randn(self.batch_size, self.random_dim, device=self.device)
-                c = c if isinstance(c, torch.Tensor) else torch.from_numpy(c)
-                c = c.to(self.device)
-                m = m if isinstance(m, torch.Tensor) else torch.from_numpy(m)
-                m = m.to(self.device)
+                c, m, col, opt = self.cond_generator.sample_train(self.batch_size)
+                c = torch.from_numpy(c).to(self.device)
+                m = torch.from_numpy(m).to(self.device)
                 noisez = torch.cat([noisez, c], dim=1).view(self.batch_size, -1, 1, 1)
 
                 optimizerG.zero_grad()
@@ -670,23 +748,10 @@ class CTABGANSynthesizer:
                     loss_cg.backward()
                     optimizerG.step()
 
-                    if wandb.run is not None:
-                        wandb.log({"loss_classifier_real": loss_cc.item(), "loss_classifier_fake": loss_cg.item()})
+                    wandb.log({"loss_classifier_real": loss_cc.item(), "loss_classifier_fake": loss_cg.item()})
 
+            wandb.log({"epoch": i, "loss_d": loss_d.item(), "loss_g": g.item(), "loss_info": loss_info.item()})
 
-            if wandb.run is not None:
-                wandb.log({"loss_classifier_real": loss_cc.item(), "loss_classifier_fake": loss_cg.item()})
-
-            
-            if (i+1)>=0:
-                os.makedirs("./checkpoints", exist_ok=True)
-                save_path = f"./checkpoints/ctabgan_epoch_{i+1}.pt"
-                torch.save({
-                    'epoch': i+1,
-                    "generator_state_dict" : self.generator.state_dict(), 
-                }, save_path)
-                print(f"saved checkpoint at epoch {i+1} -> {save_path}")
-            """
             if (i+1) >= 20 and (i+1) % 20 == 0:
                 os.makedirs("./checkpoints", exist_ok=True)
                 save_path = f"./checkpoints/ctabgan_epoch_{i+1}.pt"
@@ -694,7 +759,7 @@ class CTABGANSynthesizer:
                     'epoch': i+1,
                     "generator_state_dict" : self.generator.state_dict(), 
                 }, save_path)
-                print(f"saved checkpoint at epoch {i+1} -> {save_path}")"""
+                print(f"saved checkpoint at epoch {i+1} -> {save_path}")
                 
                             
     def sample(self, num_samples, fraud_types: list):        
@@ -705,7 +770,7 @@ class CTABGANSynthesizer:
         for fraud_type in fraud_types:
             data = []
             steps = num_samples//self.batch_size + 1
-            for _ in tqdm(range(steps), desc ="Generating"): 
+            for _ in range(steps): 
                 # generating synthetic data using sampled noise and conditional vectors
                 noisez = torch.randn(self.batch_size, self.random_dim, device=self.device)
                 condvec = self.cond_generator.sample(self.batch_size, fraud_type = fraud_type)
