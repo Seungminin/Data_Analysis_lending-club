@@ -678,15 +678,6 @@ class CTABGANSynthesizer:
                 wandb.log({"loss_classifier_real": loss_cc.item(), "loss_classifier_fake": loss_cg.item()})
 
             
-            if (i+1)>=0:
-                os.makedirs("./checkpoints", exist_ok=True)
-                save_path = f"./checkpoints/ctabgan_epoch_{i+1}.pt"
-                torch.save({
-                    'epoch': i+1,
-                    "generator_state_dict" : self.generator.state_dict(), 
-                }, save_path)
-                print(f"saved checkpoint at epoch {i+1} -> {save_path}")
-            """
             if (i+1) >= 20 and (i+1) % 20 == 0:
                 os.makedirs("./checkpoints", exist_ok=True)
                 save_path = f"./checkpoints/ctabgan_epoch_{i+1}.pt"
@@ -694,7 +685,7 @@ class CTABGANSynthesizer:
                     'epoch': i+1,
                     "generator_state_dict" : self.generator.state_dict(), 
                 }, save_path)
-                print(f"saved checkpoint at epoch {i+1} -> {save_path}")"""
+                print(f"saved checkpoint at epoch {i+1} -> {save_path}")
                 
                             
     def sample(self, num_samples, fraud_types: list):        
