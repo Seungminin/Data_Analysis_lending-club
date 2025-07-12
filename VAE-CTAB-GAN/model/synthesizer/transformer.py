@@ -32,7 +32,7 @@ class DataTransformer():
     
     """    
     
-    def __init__(self, train_data=pd.DataFrame, categorical_list=[], mixed_dict={}, n_clusters=10, eps=0.005):
+    def __init__(self, train_data=pd.DataFrame, categorical_list=[], mixed_dict={}, n_clusters=15, eps=0.005):
         
         self.meta = None
         self.train_data = train_data
@@ -94,7 +94,8 @@ class DataTransformer():
                     n_components=self.n_clusters, 
                     weight_concentration_prior_type='dirichlet_process',
                     weight_concentration_prior=0.001, # lower values result in lesser modes being active
-                    max_iter=100,n_init=1, random_state=42)
+                    covariance_type='full',      # 다양한 형태의 분산 허용
+                    max_iter=200,n_init=1,init_params='kmeans', random_state=42)
                 gm.fit(data[:, id_].reshape([-1, 1]))
                 model.append(gm)
                 # keeping only relevant modes that have higher weight than eps and are used to fit the data
@@ -116,13 +117,15 @@ class DataTransformer():
                 gm1 = BayesianGaussianMixture(
                     n_components=self.n_clusters, 
                     weight_concentration_prior_type='dirichlet_process',
-                    weight_concentration_prior=0.001, max_iter=100,
-                    n_init=1,random_state=42)
+                    weight_concentration_prior=0.001, # lower values result in lesser modes being active
+                    covariance_type='full',      # 다양한 형태의 분산 허용
+                    max_iter=200,n_init=1,init_params='kmeans', random_state=42)
                 gm2 = BayesianGaussianMixture(
-                    n_components=self.n_clusters,
+                    n_components=self.n_clusters, 
                     weight_concentration_prior_type='dirichlet_process',
-                    weight_concentration_prior=0.001, max_iter=100,
-                    n_init=1,random_state=42)
+                    weight_concentration_prior=0.001, # lower values result in lesser modes being active
+                    covariance_type='full',      # 다양한 형태의 분산 허용
+                    max_iter=200,n_init=1,init_params='kmeans', random_state=42)
                 
                 # first bgm model is fit to the entire data only for the purposes of obtaining a normalized value of any particular categorical mode
                 gm1.fit(data[:, id_].reshape([-1, 1]))

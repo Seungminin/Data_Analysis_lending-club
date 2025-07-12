@@ -8,7 +8,7 @@ import numpy as np
 
 from model.preprocess import preprocess_data
 from model.pipeline.data_utils import load_processed_data, extract_continuous_features
-from model.train_loop import train_vae_gan, generate_samples
+from model.train_loop import train_vae_gan, generate_samples,weights_init
 from model.model import VAEEncoder, CTABGenerator, Discriminator, CTABClassifier
 from model.pipeline.data_utils import show_all_parameters
 from model.sampler import Sampler
@@ -85,6 +85,12 @@ def main():
     generator = CTABGenerator(latent_dim=args.latent_dim + condvec.n_opt).to(device)
     discriminator = Discriminator(input_dim=data.shape[1]).to(device)
     classifier = CTABClassifier().to(device)
+
+    encoder.apply(weights_init)
+    generator.apply(weights_init)
+    discriminator.apply(weights_init)
+    # classifier도 CNN 구조 기반이면 초기화 적용 가능
+    classifier.apply(weights_init)
 
     model_components = {
         'encoder': encoder,
