@@ -673,11 +673,14 @@ class CTABGANSynthesizer:
                     if wandb.run is not None:
                         wandb.log({"loss_classifier_real": loss_cc.item(), "loss_classifier_fake": loss_cg.item()})
 
-
             if wandb.run is not None:
-                wandb.log({"loss_classifier_real": loss_cc.item(), "loss_classifier_fake": loss_cg.item()})
+                wandb.log({
+                    "epoch": i,
+                    "loss_d": loss_d.item(),
+                    "loss_g": g.item(),
+                    "loss_info": loss_info.item()
+                })
 
-            
             if (i+1) >= 20 and (i+1) % 20 == 0:
                 os.makedirs("./checkpoints", exist_ok=True)
                 save_path = f"./checkpoints/ctabgan_epoch_{i+1}.pt"
