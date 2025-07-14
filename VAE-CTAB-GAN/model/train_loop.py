@@ -15,7 +15,7 @@ from model.pipeline.inverse_transform import apply_activate
 from model.synthesizer.transformer import ImageTransformer, DataTransformer
 from model.condvec import Condvec
 from model.sampler import Sampler
-from model.model import CTABClassifier, VAEEncoder, CTABGenerator
+from model.model import Classifier, VAEEncoder, Generator
 
 def kl_divergence(mu, logvar):
     return -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
@@ -156,12 +156,16 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
     G_transformer = ImageTransformer(image_size)
     D_transformer = ImageTransformer(image_size)
 
-    classifier = CTABClassifier().to(device)
+    dside = image_size  # ImageTransformer에서 쓰이는 사이즈
+    num_channels = 64
+    num_classes = cond_generator.n_opt
+
+    classifier = Classifier(dside=dside, num_channels=num_channels, num_classes=num_classes).to(device)
     optimizerC = torch.optim.Adam(classifier.parameters(), lr=args.lr)
 
     dataset = TensorDataset(torch.tensor(full_data, dtype=torch.float32),
                             torch.tensor(cont_data, dtype=torch.float32))
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
 
     optimizerE = torch.optim.Adam(encoder.parameters(), lr=args.lr)
     optimizerG = torch.optim.Adam(generator.parameters(), lr=args.lr)
@@ -170,12 +174,16 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
     for epoch in tqdm(range(args.epochs), desc="Epoch"):
-        for step, (x_full, x_cont) in enumerate(loader):
+        inner_bar = tqdm(enumerate(loader), total=len(loader), desc="Step", leave=False)
+        for step, (x_full, x_cont) in inner_bar:
             x_full = x_full.to(device)
             x_cont = x_cont.to(device)
 
             c, m, col, opt = cond_generator.sample_train(args.batch_size)
-            c = torch.from_numpy(c).to(device)
+            #print(f"[DEBUG] Conditional vector shape: {c.shape}, z vector shape: {x_cont.shape[0]}")
+            if not isinstance(c, torch.Tensor):
+                c = torch.from_numpy(c)
+            c = c.to(device)
 
             z, mu, logvar = encoder(x_cont)
             input_gen = torch.cat([z, c], dim=1)
@@ -241,14 +249,38 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                     "advcls_loss": advcls_loss.item(),
                     "total_loss": total_loss.item()
                 })
-                print(f"[Epoch {epoch}/{args.epochs}] [Step {step}] D: {d_loss.item():.4f}, G: {g_loss.item():.4f}, KL: {kl_loss.item():.4f}, Recon: {recon_loss.item():.4f}, ADVCLS: {advcls_loss.item():.4f}")
+                #print(f"[Epoch {epoch}/{args.epochs}] [Step {step}] D: {d_loss.item():.4f}, G: {g_loss.item():.4f}, KL: {kl_loss.item():.4f}, Recon: {recon_loss.item():.4f}, ADVCLS: {advcls_loss.item():.4f}")
+
+        if (epoch + 1) >= 0:
+            os.makedirs("./checkpoints", exist_ok=True)
+            save_path = f"./checkpoints/vae_ctabgan_epoch_{epoch+1}.pt"
+            torch.save({
+                'epoch': epoch + 1,
+                'generator_state_dict': generator.state_dict(),
+                'encoder_state_dict': encoder.state_dict()
+            }, save_path)
+            print(f"Saved checkpoint (G + E) at epoch {epoch + 1} -> {save_path}")
+
+        """if (epoch + 1) % 20 == 0:
+            os.makedirs("./checkpoints", exist_ok=True)
+            save_path = f"./checkpoints/vae_ctabgan_epoch_{epoch+1}.pt"
+            torch.save({
+                'epoch': epoch + 1,
+                'generator_state_dict': generator.state_dict(),
+                'encoder_state_dict': encoder.state_dict()
+            }, save_path)
+            print(f"Saved checkpoint (G + E) at epoch {epoch + 1} -> {save_path}")"""
+
+        final_dir = os.path.join(args.checkpoint_dir, "final")
+        os.makedirs(final_dir, exist_ok=True)     
 
         torch.save({
             'encoder': encoder.state_dict(),
             'generator': generator.state_dict(),
             'discriminator': discriminator.state_dict(),
             'classifier': classifier.state_dict()
-        }, os.path.join(args.checkpoint_dir, f"vae_ctabgan_epoch{epoch}.pth"))
+        }, os.path.join(final_dir, f"vae_ctabgan_epoch{epoch+1}.pth"))
+        print(f" Final checkpoint saved to {os.path.join(final_dir, f've_ctabgan_epoch{epoch}.pth')}")
 
 def generate_samples(args, full_data, cont_data, device):
     with open(args.transformer_path, 'rb') as f:
@@ -260,19 +292,26 @@ def generate_samples(args, full_data, cont_data, device):
     transformer_G = ImageTransformer(image_size)
 
     encoder = VAEEncoder(input_dim=cont_data.shape[1], latent_dim=args.latent_dim).to(device)
-    generator = CTABGenerator(latent_dim=args.latent_dim + condvec.n_opt).to(device)
+
+    g_input_dim = args.latent_dim + condvec.n_opt
+    gside = int(np.ceil(np.sqrt(full_data.shape[1] + condvec.n_opt)))
+    num_channel = 64 #채널 수 64로 고정
+
+    generator = Generator(input_dim=g_input_dim, gside=gside, num_channels=num_channel).to(device)
 
     checkpoint_path = os.path.join(args.checkpoint_dir, args.save_name)
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    encoder.load_state_dict(checkpoint['encoder'])
-    generator.load_state_dict(checkpoint['generator'])
+    encoder.load_state_dict(checkpoint['encoder_state_dict'])
+    generator.load_state_dict(checkpoint['generator_state_dict'])
     encoder.eval()
     generator.eval()
 
     samples = []
-    for _ in range((args.num_samples + args.batch_size - 1) // args.batch_size):
+    for _ in tqdm(range((args.num_samples + args.batch_size - 1) // args.batch_size), desc="Generating"):
         c, _, _, _ = condvec.sample_train(args.batch_size)
-        c = torch.from_numpy(c).to(device)
+        if not isinstance(c, torch.Tensor):
+            c = torch.from_numpy(c)
+        c = c.to(device)
         z = torch.randn((args.batch_size, args.latent_dim)).to(device)
         input_gen = torch.cat([z, c], dim=1)
         with torch.no_grad():
@@ -284,4 +323,4 @@ def generate_samples(args, full_data, cont_data, device):
     final_samples = np.concatenate(samples, axis=0)[:args.num_samples]
     output_path = os.path.join(args.sample_dir, "generated_samples.csv")
     pd.DataFrame(final_samples).to_csv(output_path, index=False)
-    print(f"✅ Generated {args.num_samples} samples and saved to {output_path}")
+    print(f"Generated {args.num_samples} samples and saved to {output_path}")

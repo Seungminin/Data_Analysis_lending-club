@@ -1,7 +1,7 @@
 import argparse
 import os
-import pandas as pd
 import torch
+import pandas as pd
 import wandb
 import pickle
 import numpy as np
@@ -9,7 +9,7 @@ import numpy as np
 from model.preprocess import preprocess_data
 from model.pipeline.data_utils import load_processed_data, extract_continuous_features
 from model.train_loop import train_vae_gan, generate_samples,weights_init
-from model.model import VAEEncoder, CTABGenerator, Discriminator, CTABClassifier
+from model.model import VAEEncoder, Generator, Discriminator, Classifier
 from model.pipeline.data_utils import show_all_parameters
 from model.sampler import Sampler
 from model.condvec import Condvec
@@ -32,11 +32,11 @@ def parse_args():
     parser.add_argument("--g_weight", type=float, default=1.0, help="Generator loss weight")
     parser.add_argument("--wandb_project", type=str, default="vae-ctab-gan", help="wandb project name")
     parser.add_argument("--wandb_run", type=str, default="joint-training", help="wandb run name")
-    parser.add_argument('--dataset_path', type=str, default='dataset/train_category_1.csv')
+    parser.add_argument('--dataset_path', type=str, default='Real_Datasets/train_category_1.csv')
     parser.add_argument('--sample_dir', type=str, default='samples')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
     parser.add_argument('--save_name', type=str, default='vae_ctabgan.pt')
-    parser.add_argument('--preprocessed_path', type=str, default='dataset/preprocessed.csv')
+    parser.add_argument('--preprocessed_path', type=str, default='preprocess/preprocessed.csv')
     parser.add_argument('--transformer_path', type=str, default='preprocess/transformer/transformer.pkl')
     parser.add_argument('--num_samples', type=int, default=540000, help='Number of samples to generate')
     return parser.parse_args()
@@ -66,15 +66,16 @@ def main():
         transformer = pickle.load(f)
         args.output_info = transformer.output_info
 
-    condvec = Condvec(data.values, transformer.output_info, device=device)
-    sampler = Sampler(data.values, transformer.output_info, device=device)
+    condvec = Condvec(data, transformer.output_info, device=device)
+    sampler = Sampler(data, transformer.output_info, device=device)
+
 
     if args.mode == "generate":
-        print("\u2728 Generating synthetic samples via generate_samples()....")
+        print("\Generating synthetic samples via generate_samples()....")
         generate_samples(
             args=args,
-            full_data=data.values,
-            cont_data=cont_data.values,
+            full_data=data,
+            cont_data=cont_data,
             device=device
         )
         return
@@ -82,27 +83,24 @@ def main():
     wandb.init(project=args.wandb_project, name=args.wandb_run, config=vars(args))
 
     encoder = VAEEncoder(input_dim=cont_data.shape[1], latent_dim=args.latent_dim).to(device)
-    generator = CTABGenerator(latent_dim=args.latent_dim + condvec.n_opt).to(device)
-    discriminator = Discriminator(input_dim=data.shape[1]).to(device)
-    classifier = CTABClassifier().to(device)
+
+    g_input_dim = args.latent_dim + condvec.n_opt
+    gside = int(np.ceil(np.sqrt(data.shape[1] + condvec.n_opt)))
+    num_channel = 64 #채널 수 64로 고정
+
+    generator = Generator(input_dim=g_input_dim, gside=gside, num_channels=num_channel).to(device)
+    discriminator = Discriminator(dside=gside, num_channels=num_channel).to(device)
+    classifier = Classifier(dside=gside, num_channels=num_channel, num_classes=condvec.n_opt).to(device)
 
     encoder.apply(weights_init)
     generator.apply(weights_init)
-    discriminator.apply(weights_init)
-    # classifier도 CNN 구조 기반이면 초기화 적용 가능
-    classifier.apply(weights_init)
+    #discriminator.apply(weights_init)
+    #classifier.apply(weights_init)
 
-    model_components = {
-        'encoder': encoder,
-        'generator': generator,
-        'discriminator': discriminator,
-        'classifier': classifier
-    }
-
-    show_all_parameters(encoder)
-    show_all_parameters(generator)
-    show_all_parameters(discriminator)
-    show_all_parameters(classifier)
+    show_all_parameters(encoder, name="VAE Encoder")
+    show_all_parameters(generator, name="Generater")
+    show_all_parameters(discriminator,name="Discriminator")
+    show_all_parameters(classifier, name="Classifier")
 
     if args.mode in ["train", "only_train"]:
         print("\u2728 Starting training...")
@@ -110,11 +108,12 @@ def main():
             encoder=encoder,
             generator=generator,
             discriminator=discriminator,
-            full_data=data.values,
-            cont_data=cont_data.values,
+            full_data=data,            
+            cont_data=cont_data,
             args=args,
             device=device
         )
+
 
 if __name__ == "__main__":
     main()

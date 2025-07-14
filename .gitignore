@@ -13,6 +13,8 @@ requirements.txt
 ## checkpoint 파일 모두 생략
 *.pt
 
+*.pth
+
 
 ## original tablegan gitignore file
 

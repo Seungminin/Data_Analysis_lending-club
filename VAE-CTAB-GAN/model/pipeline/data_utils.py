@@ -25,10 +25,10 @@ class TabularDataset(Dataset):
     def __getitem__(self, idx): return self.X[idx], self.y[idx]
 
 
-def show_all_parameters(model):
+def show_all_parameters(model, name = "Model"):
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Total params: {total:,} | Trainable: {trainable:,}")
+    print(f"{name} | Total params: {total:,} | Trainable: {trainable:,}")
 
 
 def load_transformer(path):
@@ -38,7 +38,7 @@ def load_transformer(path):
 
 
 def load_processed_data(path='./preprocess/processed.csv'):
-    print(f"📥 Loading processed data from {path}...")
+    print(f"Loading processed data from {path}...")
     return pd.read_csv(path).astype(np.float32).values
 
 
