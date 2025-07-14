@@ -48,3 +48,9 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
     with open('./preprocess/transformer/transformer.pkl', 'wb') as f:
         pickle.dump(transformer, f)
     print(" Saved transformer to ./preprocess/transformer/transformer.pkl")
+
+    os.makedirs('./preprocess/dataprep', exist_ok=True)
+    with open('./preprocess/dataprep/dataprep.pkl', 'wb') as f:
+        pickle.dump(prep, f)
+    print("✅ Saved DataPrep object to ./preprocess/dataprep.pkl")
+

@@ -283,25 +283,28 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
         print(f" Final checkpoint saved to {os.path.join(final_dir, f've_ctabgan_epoch{epoch}.pth')}")
 
 def generate_samples(args, full_data, cont_data, device):
+    import pickle
+
+    # Load transformer
     with open(args.transformer_path, 'rb') as f:
         transformer = pickle.load(f)
     output_info = transformer.output_info
+
+    # Load DataPrep for inverse_prep
+    with open("preprocess/dataprep/dataprep.pkl", "rb") as f:
+        dataprep = pickle.load(f)
 
     condvec = Condvec(full_data, output_info)
     image_size = int(np.ceil(np.sqrt(full_data.shape[1] + condvec.n_opt)))
     transformer_G = ImageTransformer(image_size)
 
     encoder = VAEEncoder(input_dim=cont_data.shape[1], latent_dim=args.latent_dim).to(device)
-
-    g_input_dim = args.latent_dim + condvec.n_opt
-    gside = int(np.ceil(np.sqrt(full_data.shape[1] + condvec.n_opt)))
-    num_channel = 64 #채널 수 64로 고정
-
-    generator = Generator(input_dim=g_input_dim, gside=gside, num_channels=num_channel).to(device)
+    generator = Generator(input_dim=args.latent_dim + condvec.n_opt,
+                          gside=image_size, num_channels=64).to(device)
 
     checkpoint_path = os.path.join(args.checkpoint_dir, args.save_name)
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    encoder.load_state_dict(checkpoint['encoder_state_dict'])
+    encoder.load_state_dict(checkpoint['encoder_state_dict']) ## 1epoch할 때는 encoder_state_dict
     generator.load_state_dict(checkpoint['generator_state_dict'])
     encoder.eval()
     generator.eval()
@@ -321,6 +324,10 @@ def generate_samples(args, full_data, cont_data, device):
             samples.append(fake_activated.cpu().numpy())
 
     final_samples = np.concatenate(samples, axis=0)[:args.num_samples]
+    tabular_data = transformer.inverse_transform(final_samples)  # One-hot → numeric/categorical 복원
+    recovered_df = dataprep.inverse_prep(tabular_data)  # log, label decoding, rounding 등 최종 복원
+
     output_path = os.path.join(args.sample_dir, "generated_samples.csv")
-    pd.DataFrame(final_samples).to_csv(output_path, index=False)
-    print(f"Generated {args.num_samples} samples and saved to {output_path}")
+    recovered_df.to_csv(output_path, index=False)
+    print(f"✅ Generated {args.num_samples} samples and saved to {output_path}")
+
