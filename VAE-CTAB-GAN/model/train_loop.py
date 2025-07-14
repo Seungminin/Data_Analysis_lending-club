@@ -251,7 +251,7 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                 })
                 #print(f"[Epoch {epoch}/{args.epochs}] [Step {step}] D: {d_loss.item():.4f}, G: {g_loss.item():.4f}, KL: {kl_loss.item():.4f}, Recon: {recon_loss.item():.4f}, ADVCLS: {advcls_loss.item():.4f}")
 
-        if (epoch + 1) >= 0:
+        if (epoch + 1)>=50 and (epoch + 1) % 20 == 0:
             os.makedirs("./checkpoints", exist_ok=True)
             save_path = f"./checkpoints/vae_ctabgan_epoch_{epoch+1}.pt"
             torch.save({
@@ -260,16 +260,6 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                 'encoder_state_dict': encoder.state_dict()
             }, save_path)
             print(f"Saved checkpoint (G + E) at epoch {epoch + 1} -> {save_path}")
-
-        """if (epoch + 1) % 20 == 0:
-            os.makedirs("./checkpoints", exist_ok=True)
-            save_path = f"./checkpoints/vae_ctabgan_epoch_{epoch+1}.pt"
-            torch.save({
-                'epoch': epoch + 1,
-                'generator_state_dict': generator.state_dict(),
-                'encoder_state_dict': encoder.state_dict()
-            }, save_path)
-            print(f"Saved checkpoint (G + E) at epoch {epoch + 1} -> {save_path}")"""
 
         final_dir = os.path.join(args.checkpoint_dir, "final")
         os.makedirs(final_dir, exist_ok=True)     
@@ -306,6 +296,8 @@ def generate_samples(args, full_data, cont_data, device):
     checkpoint = torch.load(checkpoint_path, map_location=device)
     encoder.load_state_dict(checkpoint['encoder_state_dict']) ## 1epoch할 때는 encoder_state_dict
     generator.load_state_dict(checkpoint['generator_state_dict'])
+    #encoder.load_state_dict(checkpoint['encoder']) ## 1epoch할 때는 encoder_state_dict
+    #generator.load_state_dict(checkpoint['generator'])
     encoder.eval()
     generator.eval()
 
