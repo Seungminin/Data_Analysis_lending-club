@@ -264,13 +264,13 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
         final_dir = os.path.join(args.checkpoint_dir, "final")
         os.makedirs(final_dir, exist_ok=True)     
 
-        torch.save({
-            'encoder': encoder.state_dict(),
-            'generator': generator.state_dict(),
-            'discriminator': discriminator.state_dict(),
-            'classifier': classifier.state_dict()
-        }, os.path.join(final_dir, f"vae_ctabgan_epoch{epoch+1}.pth"))
-        print(f" Final checkpoint saved to {os.path.join(final_dir, f've_ctabgan_epoch{epoch}.pth')}")
+    torch.save({
+        'encoder': encoder.state_dict(),
+        'generator': generator.state_dict(),
+        'discriminator': discriminator.state_dict(),
+        'classifier': classifier.state_dict()
+    }, os.path.join(final_dir, f"vae_ctabgan_epoch{epoch+1}.pth"))
+    print(f" Final checkpoint saved to {os.path.join(final_dir, f've_ctabgan_epoch{epoch}.pth')}")
 
 def generate_samples(args, full_data, cont_data, device):
     import pickle
