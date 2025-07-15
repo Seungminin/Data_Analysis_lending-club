@@ -230,6 +230,8 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                 fake_cat = torch.cat([fake_activated, c], dim=1)
 
                 real_data = torch.from_numpy(sampler.sample(args.batch_size, col, opt)).to(device)
+                if epoch < args.real_activate_until_epoch:
+                    real_data = apply_activate(real_data, transformer.output_info)
                 real_cat = torch.cat([real_data, c], dim=1)
 
                 real_image = D_transformer.transform(real_cat)
