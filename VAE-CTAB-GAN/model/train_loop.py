@@ -204,14 +204,13 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                 c = torch.from_numpy(c)
             c = c.to(device)
 
-            z, mu, logvar = encoder(x_cont)
-            input_gen = torch.cat([z, c], dim=1)
-
             # 디버깅 코드 - VAE sampling이 안정적인지 확인
             """print(f"[DEBUG] mu.mean={mu.mean().item():.4f}, mu.std={mu.std().item():.4f}")
             print(f"[DEBUG] logvar.mean={logvar.mean().item():.4f}, logvar.std={logvar.std().item():.4f}")
             print(f"[DEBUG] z.mean={z.mean().item():.4f}, z.std={z.std().item():.4f}")"""
 
+            z, mu, logvar = encoder(x_cont)
+            input_gen = torch.cat([z, c], dim=1)
             recon_image = generator(input_gen)
             recon_tabular = G_transformer.inverse_transform(recon_image)
             recon_cont = recon_tabular[:, :x_cont.shape[1]]
@@ -222,21 +221,30 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
             fake_activated = apply_activate(fake_tabular, transformer.output_info)
             conditional_loss = cond_loss(fake_tabular, transformer.output_info, c, m)  # ← 추가
             
-            real_data = torch.from_numpy(sampler.sample(args.batch_size, col, opt)).to(device)
-            real_cat = torch.cat([real_data, c], dim=1)
-            fake_cat = torch.cat([fake_activated, c], dim=1)
+            if step % 5 == 0:
+                z, mu, logvar = encoder(x_cont)
+                input_gen = torch.cat([z, c], dim=1)
+                fake_image = generator(input_gen).detach()
+                fake_tabular = G_transformer.inverse_transform(fake_image)
+                fake_activated = apply_activate(fake_tabular, transformer.output_info)
+                fake_cat = torch.cat([fake_activated, c], dim=1)
 
-            real_image = D_transformer.transform(real_cat)
-            fake_image_d = D_transformer.transform(fake_cat)
+                real_data = torch.from_numpy(sampler.sample(args.batch_size, col, opt)).to(device)
+                real_cat = torch.cat([real_data, c], dim=1)
 
-            real_validity,_ = discriminator(real_image)
-            fake_validity,_ = discriminator(fake_image_d)
-            gp = compute_gradient_penalty(discriminator, real_image.data, fake_image_d.data, device)
+                real_image = D_transformer.transform(real_cat)
+                fake_image_d = D_transformer.transform(fake_cat)
 
-            d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + 10 * gp
-            optimizerD.zero_grad()
-            d_loss.backward()
-            optimizerD.step()
+                real_validity, _ = discriminator(real_image)
+                fake_validity, _ = discriminator(fake_image_d)
+                gp = compute_gradient_penalty(discriminator, real_image.data, fake_image_d.data, device)
+
+                d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + 10 * gp
+                optimizerD.zero_grad()
+                d_loss.backward()
+                optimizerD.step()
+            else:
+                d_loss = torch.tensor(0.0)  # placeholder for wandb logging
 
             z, mu, logvar = encoder(x_cont)
             input_gen = torch.cat([z, c], dim=1)

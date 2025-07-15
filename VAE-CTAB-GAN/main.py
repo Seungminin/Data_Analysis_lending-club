@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument("--kl_weight", type=float, default=0.1)
     parser.add_argument("--recon_weight", type=float, default=5.0)
     parser.add_argument("--g_weight", type=float, default=1.0)
-    parser.add_argument("--info_weight", type=float, default=5.0)
+    parser.add_argument("--info_weight", type=float, default=1.0)
     parser.add_argument('--delta_mean', type=float, default=0.1)
     parser.add_argument('--delta_var', type=float, default=0.1)
     parser.add_argument('--cond_weight', type=float, default=1.0, help='Weight for conditional loss')
