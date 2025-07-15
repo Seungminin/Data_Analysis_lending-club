@@ -79,9 +79,9 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, x):
-        out = self.conv(x)
-        return out.view(-1, 1)
-
+        h = self.conv[:-1](x)
+        out = self.conv[-1](h)
+        return out.view(-1, 1), h.view(h.size(0), -1) 
 
 class Classifier(nn.Module):
     def __init__(self, dside, num_channels, num_classes):
