@@ -40,18 +40,21 @@ class VAEEncoder(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self, input_dim, gside, num_channels=32):
+    def __init__(self, input_dim, gside, num_channels):
         super().__init__()
-        self.init_dim = (num_channels * 4, gside // 4, gside // 4)
+        self.init_dim = (num_channels * 8, gside // 8, gside // 8)
         self.fc = nn.Linear(input_dim, int(np.prod(self.init_dim)))
 
         self.deconv = nn.Sequential(
+            nn.BatchNorm2d(num_channels * 8),
+            nn.ReLU(),
+            nn.ConvTranspose2d(num_channels * 8, num_channels * 4, 4, 2, 1),
             nn.BatchNorm2d(num_channels * 4),
             nn.ReLU(),
             nn.ConvTranspose2d(num_channels * 4, num_channels * 2, 4, 2, 1),
             nn.BatchNorm2d(num_channels * 2),
             nn.ReLU(),
-            nn.ConvTranspose2d(num_channels * 2, 1, 4, 2, 1),  # output: (B, 1, gside, gside)
+            nn.ConvTranspose2d(num_channels * 2, 1, 4, 2, 1)  # (B, 1, gside, gside)
         )
 
     def forward(self, z):
@@ -60,23 +63,25 @@ class Generator(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, dside, num_channels=32):
+    def __init__(self, dside, num_channels):
         super().__init__()
-        self.feature = nn.Sequential(
+        self.conv = nn.Sequential(
             nn.Conv2d(1, num_channels, 4, 2, 1),
             nn.BatchNorm2d(num_channels),
             nn.LeakyReLU(0.2),
             nn.Conv2d(num_channels, num_channels * 2, 4, 2, 1),
             nn.BatchNorm2d(num_channels * 2),
             nn.LeakyReLU(0.2),
+            nn.Conv2d(num_channels * 2, num_channels * 4, 4, 2, 1),
+            nn.BatchNorm2d(num_channels * 4),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(num_channels * 4, 1, dside // 8, 1, 0)
         )
-        self.out = nn.Conv2d(num_channels * 2, 1, dside // 4, 1, 0)  # output scalar
 
     def forward(self, x):
-        h = self.feature(x)
-        out = self.out(h)
-        return out.view(-1, 1), h.view(h.size(0), -1)  # validity, features
-
+        h = self.conv[:-1](x)
+        out = self.conv[-1](h)
+        return out.view(-1, 1), h.view(h.size(0), -1) 
 
 class Classifier(nn.Module):
     def __init__(self, dside, num_channels, num_classes):

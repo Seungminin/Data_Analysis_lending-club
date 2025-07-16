@@ -24,7 +24,7 @@ def parse_args():
                         help="Choose one mode: preprocess, train, generate, only_train")
     parser.add_argument('--z_dim', type=int, default=64)
     parser.add_argument("--embedding_dim", type=int, default=128)
-    parser.add_argument("--epochs", type=int, default=300)
+    parser.add_argument("--epochs", type=int, default=150)
     parser.add_argument("--encoder_freeze_epoch", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--latent_dim", type=int, default=64)
