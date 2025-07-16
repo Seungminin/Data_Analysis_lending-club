@@ -401,7 +401,7 @@ def generate_samples(args, full_data, cont_data, device):
     tabular_data = transformer.inverse_transform(final_samples)  # One-hot → numeric/categorical 복원
     recovered_df = dataprep.inverse_prep(tabular_data)  # log, label decoding, rounding 등 최종 복원
 
-    output_path = os.path.join(args.sample_dir, "generated_samples_info.csv")
+    output_path = os.path.join(args.sample_dir, "generated_samples_shallow.csv")
     recovered_df.to_csv(output_path, index=False)
     print(f"✅ Generated {args.num_samples} samples and saved to {output_path}")
 
