@@ -194,12 +194,6 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
 
     for epoch in tqdm(range(args.epochs), desc="Epoch"):
         inner_bar = tqdm(enumerate(loader), total=len(loader), desc="Step", leave=False)
-
-        if epoch == args.encoder_freeze_epoch:
-            for param in encoder.parameters():
-                param.requires_grad = False
-            encoder.eval()
-
         for step, (x_full, x_cont) in inner_bar:
             x_full = x_full.to(device)
             x_cont = x_cont.to(device)
@@ -217,38 +211,31 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
 
             z, mu, logvar = encoder(x_cont)
             input_gen = torch.cat([z, c], dim=1)
-            fake_image = generator(input_gen)
+            recon_image = generator(input_gen)
+            recon_tabular = G_transformer.inverse_transform(recon_image)
+            recon_cont = recon_tabular[:, :x_cont.shape[1]]
+            recon_loss = F.mse_loss(recon_cont, x_cont)
+
+            fake_image = generator(input_gen).detach()
             fake_tabular = G_transformer.inverse_transform(fake_image)
             fake_activated = apply_activate(fake_tabular, transformer.output_info)
-            recon_cont = fake_tabular[:, :x_cont.shape[1]]
-            recon_loss = F.mse_loss(recon_cont, x_cont)
-            kl_loss = kl_divergence(mu, logvar)
-
-            if epoch < args.encoder_freeze_epoch:
-                vae_loss = recon_loss + args.kl_weight * kl_loss
-                optimizerE.zero_grad()
-                optimizerG.zero_grad()
-                vae_loss.backward()
-                optimizerE.step()
-                optimizerG.step()
-                continue  # skip GAN part
+            conditional_loss = cond_loss(fake_tabular, transformer.output_info, c, m)  # ← 추가
             
             if step % 5 == 0:
-                with torch.no_grad():
-                    z, mu, logvar = encoder(x_cont)
-                    input_gen = torch.cat([z, c], dim=1)
-                    fake_image = generator(input_gen).detach()
-                    fake_tabular = G_transformer.inverse_transform(fake_image)
-                    fake_activated = apply_activate(fake_tabular, transformer.output_info)
-                    fake_cat = torch.cat([fake_activated, c], dim=1)
+                z, mu, logvar = encoder(x_cont)
+                input_gen = torch.cat([z, c], dim=1)
+                fake_image = generator(input_gen).detach()
+                fake_tabular = G_transformer.inverse_transform(fake_image)
+                fake_activated = apply_activate(fake_tabular, transformer.output_info)
+                fake_cat = torch.cat([fake_activated, c], dim=1)
 
-                    real_data = torch.from_numpy(sampler.sample(args.batch_size, col, opt)).to(device)
-                    if epoch < args.real_activate_until_epoch:
-                        real_data = apply_activate(real_data, transformer.output_info)
-                    real_cat = torch.cat([real_data, c], dim=1)
+                real_data = torch.from_numpy(sampler.sample(args.batch_size, col, opt)).to(device)
+                if epoch < args.real_activate_until_epoch:
+                    real_data = apply_activate(real_data, transformer.output_info)
+                real_cat = torch.cat([real_data, c], dim=1)
 
-                    real_image = D_transformer.transform(real_cat)
-                    fake_image_d = D_transformer.transform(fake_cat)
+                real_image = D_transformer.transform(real_cat)
+                fake_image_d = D_transformer.transform(fake_cat)
 
                 real_validity, _ = discriminator(real_image)
                 fake_validity, _ = discriminator(fake_image_d)
@@ -269,10 +256,15 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
             fake_cat = torch.cat([fake_activated, c], dim=1)
             fake_image_d = D_transformer.transform(fake_cat)
 
-            ##g_loss
+            has_nan(input_gen, "input_gen")
+            has_nan(fake_image, "fake_image")
+            has_nan(fake_tabular, "fake_tabular")
+            has_nan(fake_activated, "fake_activated")
+
+            ##g_loss, kl, recons_loss
             g_out, _ = discriminator(fake_image_d)
             g_loss = -torch.mean(g_out)
-            conditional_loss = cond_loss(fake_tabular, transformer.output_info, c, m)
+            kl_loss = kl_divergence(mu, logvar)
 
             ## info_loss
             _, real_features = discriminator(real_image) 
@@ -287,21 +279,19 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                 fake_image_d = fake_image_d[0]
             advcls_loss = F.cross_entropy(classifier(fake_image_d), torch.argmax(c, dim=1))
 
-            recon_weight = 0.01
-            kl_weight = 0.01
-            
-            ## freeze 단계에서 kl, recon 영향력 줄이기.
             total_loss = (args.g_weight * g_loss +
-                          kl_weight * kl_loss +
-                          recon_weight * recon_loss +
+                          args.kl_weight * kl_loss +
+                          args.recon_weight * recon_loss +
                           args.cond_weight * conditional_loss +
                           args.info_weight * info_loss
                           )
 
             optimizerG.zero_grad()
+            optimizerE.zero_grad()
             optimizerC.zero_grad()
             total_loss.backward()
             optimizerG.step()
+            optimizerE.step()
             optimizerC.step()
 
             """# 학습 루프 내부에 삽입
@@ -311,8 +301,8 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                     print(f"[DEBUG] fake_tabular: {fake_tabular[0, :10]}")
                     print(f"[DEBUG] fake_activated: {fake_activated[0, :10]}")"""
 
-            #if step % 100 == 0:
-            wandb.log({
+            if step % 100 == 0:
+                wandb.log({
                     "epoch": epoch,
                     "step": step,
                     "d_loss": d_loss.item(),
@@ -321,9 +311,8 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                     "recon_loss": recon_loss.item(),
                     "advcls_loss": advcls_loss.item(),
                     "info_loss": info_loss.item(),
-                    "cond_loss": conditional_loss.item(),
                     "total_loss": total_loss.item()
-            })
+                })
                 #print(f"[Epoch {epoch}/{args.epochs}] [Step {step}] D: {d_loss.item():.4f}, G: {g_loss.item():.4f}, KL: {kl_loss.item():.4f}, Recon: {recon_loss.item():.4f}, ADVCLS: {advcls_loss.item():.4f}")
 
         """min_val = fake_activated.min().item()
