@@ -241,6 +241,7 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                 })
                 continue  # skip GAN part
             
+            #CTAB-GAN+ 논문 학습 5:1 비율 혹은 10:1 비율
             if step % 5 == 0:
                 with torch.no_grad():
                     z, mu, logvar = encoder(x_cont)
@@ -297,13 +298,15 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
 
             recon_weight = 0.01
             kl_weight = 1.0
+            advcls_weight = 1.0
             
             ## freeze 단계에서 kl, recon 영향력 줄이기.
             total_loss = (args.g_weight * g_loss +
                           kl_weight * kl_loss +
                           recon_weight * recon_loss +
                           args.cond_weight * conditional_loss +
-                          args.info_weight * info_loss
+                          args.info_weight * info_loss + 
+                          advcls_weight * advcls_loss
                           )
 
             optimizerG.zero_grad()
@@ -384,10 +387,10 @@ def generate_samples(args, full_data, cont_data, device):
 
     checkpoint_path = os.path.join(args.checkpoint_dir, args.save_name)
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    encoder.load_state_dict(checkpoint['encoder_state_dict']) ## 1epoch할 때는 encoder_state_dict
-    generator.load_state_dict(checkpoint['generator_state_dict'])
-    #encoder.load_state_dict(checkpoint['encoder']) ## 1epoch할 때는 encoder_state_dict
-    #generator.load_state_dict(checkpoint['generator'])
+    #encoder.load_state_dict(checkpoint['encoder_state_dict']) ## 1epoch할 때는 encoder_state_dict
+    #generator.load_state_dict(checkpoint['generator_state_dict'])
+    encoder.load_state_dict(checkpoint['encoder']) ## 1epoch할 때는 encoder_state_dict
+    generator.load_state_dict(checkpoint['generator'])
     encoder.eval()
     generator.eval()
 
@@ -407,9 +410,10 @@ def generate_samples(args, full_data, cont_data, device):
 
     final_samples = np.concatenate(samples, axis=0)[:args.num_samples]
     tabular_data = transformer.inverse_transform(final_samples)  # One-hot → numeric/categorical 복원
+    tabular_data = np.where(tabular_data < 0, 0.0, tabular_data)
     recovered_df = dataprep.inverse_prep(tabular_data)  # log, label decoding, rounding 등 최종 복원
 
-    output_path = os.path.join(args.sample_dir, "generated_samples_shallow.csv")
+    output_path = os.path.join(args.sample_dir, "generated_samples_newencoder.csv")
     recovered_df.to_csv(output_path, index=False)
     print(f"✅ Generated {args.num_samples} samples and saved to {output_path}")
 

@@ -9,19 +9,23 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
             'purpose', 'home_ownership', 'loan_status', 'sub_grade',
             'grade', 'term_months', 'debt_settlement_flag'
         ],
-        log_columns=[], 
+        log_columns=['avg_cur_bal', 'installment', 'total_pymnt', 'total_pymnt_inv'], 
         mixed_columns={  
-            'annual_income': [0.0]
+            'annual_income': [0.0],
+            'dti': [0.0],
+            'revol_util': [0.0],
+            'int_rate': [0.0],
+            'loan_amnt' : [0.0],
+            'funded_amnt' : [0.0]
         },
-        single_gaussian_columns=[
-            'revol_util', 'int_rate', 'fico_range_high'
-        ],
+
+        single_gaussian_columns=[],
+
         skew_multi_mode_columns=[
-            'credit_history_years', 'loan_amnt', 'installment', 'dti',
-            'funded_amnt', 'total_pymnt', 'total_pymnt_inv',
-            'avg_cur_bal', 'mo_sin_old_rev_tl_op'
+            'last_fico_range_high','mo_sin_old_rev_tl_op','credit_history_years'
         ],
-        integer_columns=['credit_history_years', 'term_months'],
+
+        integer_columns=['credit_history_years', 'term_months', 'last_fico_range_high'],
         problem_type={"Classification": 'loan_status'},
         test_ratio=0.20,
         save_path='./preprocess/processed.csv'):

@@ -360,11 +360,12 @@ class DataTransformer():
                 v = data[:, st + 1:st + 1 + np.sum(self.components[id_])]
                 
                 # re-ordering the modes as per their original ordering
-                order = self.ordering[id_] 
-                v_re_ordered = np.zeros_like(v)
-                for id,val in enumerate(order):
-                    v_re_ordered[:,val] = v[:,id]
-                v = v_re_ordered
+                order = self.ordering[id_]
+                if order is not None:
+                    v_re_ordered = np.zeros_like(v)
+                    for i, val in enumerate(order):
+                        v_re_ordered[:, val] = v[:, i]
+                    v = v_re_ordered
 
                 # ensuring un-used modes are represented with -100 such that they can be ignored when computing argmax
                 v_t = np.ones((data.shape[0], self.n_clusters)) * -100
@@ -401,10 +402,11 @@ class DataTransformer():
                 
                 # re-ordering the modes as per their original ordering
                 order = self.ordering[id_]
-                full_v_re_ordered = np.zeros_like(full_v)
-                for id,val in enumerate(order):
-                    full_v_re_ordered[:,val] = full_v[:,id]
-                full_v = full_v_re_ordered                
+                if order is not None:
+                    full_v_re_ordered = np.zeros_like(full_v)
+                    for i, val in enumerate(order):
+                        full_v_re_ordered[:, val] = full_v[:, i]
+                    full_v = full_v_re_ordered            
                 
                 # modes of categorical component
                 mixed_v = full_v[:,:len(info['modal'])]
