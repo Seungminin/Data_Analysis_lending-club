@@ -74,7 +74,8 @@ def main():
     with open(args.transformer_path, 'rb') as f:
         transformer = pickle.load(f)
         args.output_info = transformer.output_info
-
+        args.output_dim = transformer.output_dim
+        
     condvec = Condvec(data, transformer.output_info, device=device)
     sampler = Sampler(data, transformer.output_info, device=device)
 

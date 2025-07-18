@@ -166,13 +166,13 @@ def has_nan(tensor, name="tensor"):
 def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args, device):
     with open(args.transformer_path, 'rb') as f:
         transformer = pickle.load(f)
-    transformer.output_dim = full_data.shape[1]
+    #transformer.output_dim = full_data.shape[1]
 
     cond_generator = Condvec(full_data, transformer.output_info)
     sampler = Sampler(full_data, transformer.output_info)
 
     image_size = int(np.ceil(np.sqrt(full_data.shape[1] + cond_generator.n_opt)))
-    G_transformer = ImageTransformer(image_size)
+    G_transformer = ImageTransformer(image_size, orig_dim=args.output_dim)
     D_transformer = ImageTransformer(image_size)
 
     dside = image_size  # ImageTransformer에서 쓰이는 사이즈
@@ -218,6 +218,7 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
             z, mu, logvar = encoder(x_cont)
             input_gen = torch.cat([z, c], dim=1)
             fake_image = generator(input_gen)
+
             fake_tabular = G_transformer.inverse_transform(fake_image)
             fake_activated = apply_activate(fake_tabular, transformer.output_info)
             recon_cont = fake_tabular[:, :x_cont.shape[1]]
@@ -231,6 +232,13 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                 vae_loss.backward()
                 optimizerE.step()
                 optimizerG.step()
+
+                wandb.log({
+                    "epoch": epoch,
+                    "step": step,
+                    "kl_loss": kl_loss.item(),
+                    "recon_loss": recon_loss.item(),
+                })
                 continue  # skip GAN part
             
             if step % 5 == 0:
@@ -288,7 +296,7 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
             advcls_loss = F.cross_entropy(classifier(fake_image_d), torch.argmax(c, dim=1))
 
             recon_weight = 0.01
-            kl_weight = 0.01
+            kl_weight = 1.0
             
             ## freeze 단계에서 kl, recon 영향력 줄이기.
             total_loss = (args.g_weight * g_loss +
@@ -368,7 +376,7 @@ def generate_samples(args, full_data, cont_data, device):
 
     condvec = Condvec(full_data, output_info)
     image_size = int(np.ceil(np.sqrt(full_data.shape[1] + condvec.n_opt)))
-    transformer_G = ImageTransformer(image_size)
+    transformer_G = ImageTransformer(image_size, orig_dim=args.output_dim)
 
     encoder = VAEEncoder(input_dim=cont_data.shape[1], latent_dim=args.latent_dim).to(device)
     generator = Generator(input_dim=args.latent_dim + condvec.n_opt,
@@ -392,10 +400,10 @@ def generate_samples(args, full_data, cont_data, device):
         z = torch.randn((args.batch_size, args.latent_dim)).to(device)
         input_gen = torch.cat([z, c], dim=1)
         with torch.no_grad():
-            fake_image = generator(input_gen)
-            fake_tabular = transformer_G.inverse_transform(fake_image)
-            fake_activated = apply_activate(fake_tabular, output_info)
-            samples.append(fake_activated.cpu().numpy())
+            fake_image = generator(input_gen) #이미지 데이터로 만들고
+            fake_tabular = transformer_G.inverse_transform(fake_image) #이미지를 -> Tabular하게 만들고
+            #fake_activated = apply_activate(fake_tabular, output_info) #실수화되어있는 값들을, 원본 데이터와 비슷하게 복원
+            samples.append(fake_tabular.cpu().numpy())
 
     final_samples = np.concatenate(samples, axis=0)[:args.num_samples]
     tabular_data = transformer.inverse_transform(final_samples)  # One-hot → numeric/categorical 복원

@@ -32,7 +32,7 @@ class DataTransformer():
     
     """    
     
-    def __init__(self, train_data=pd.DataFrame, categorical_list=[], mixed_dict={}, skewed_list=[], gaussian_list=[], n_clusters=15, eps=0.005):
+    def __init__(self, train_data=pd.DataFrame, categorical_list=[], mixed_dict={}, skewed_list=[], gaussian_list=[], n_clusters=10, eps=0.005):
         self.meta = None
         self.train_data = train_data
         self.categorical_columns = categorical_list
@@ -463,21 +463,28 @@ class ImageTransformer():
 
     """
     
-    def __init__(self, side):
+    def __init__(self, side, orig_dim = None):
     
         self.height = side
+        self.orig_dim = orig_dim if orig_dim is not None else side * side
             
     def transform(self, data):
-        
-        if self.height * self.height > len(data[0]):
-            # tabular data records are padded with 0 to conform to square shaped images
-            padding = torch.zeros((len(data), self.height * self.height - len(data[0]))).to(data.device)
+        # tabular data records are padded with 0 to conform to square shaped images
+        self.orig_dim = data.shape[1]  # 저장
+        if self.height * self.height > self.orig_dim:
+            padding = torch.zeros((len(data), self.height * self.height - self.orig_dim)).to(data.device)
             data = torch.cat([data, padding], axis=1)
-
         return data.view(-1, 1, self.height, self.height)
 
     def inverse_transform(self, data):
-        
-        data = data.view(-1, self.height * self.height)
+        expected_size = self.height * self.height
+        total_elements = data.numel()
 
-        return data
+        if total_elements % expected_size != 0:
+            raise ValueError(f"[❌] Data size {total_elements} is not divisible by image size {expected_size}. "
+                            f"Expected shape (-1, {expected_size}), but got incompatible total size.")
+
+        data = data.reshape(-1, expected_size)
+        return data[:, :self.orig_dim]
+        """data = data.view(-1, self.height * self.height)
+        return data[:, :self.orig_dim]"""

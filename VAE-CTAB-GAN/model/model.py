@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision.transforms.functional import center_crop
 import numpy as np
 
 
@@ -38,11 +39,12 @@ class VAEEncoder(nn.Module):
         z = mu + eps * std
         return z, mu, logvar
 
+import torch.nn.functional as F
 
 class Generator(nn.Module):
-    def __init__(self, input_dim, gside, num_channels=32):
+    def __init__(self, input_dim, gside=19, num_channels=32):
         super().__init__()
-        self.init_dim = (num_channels * 4, gside // 4, gside // 4)
+        self.init_dim = (num_channels * 4, 5, 5)
         self.fc = nn.Linear(input_dim, int(np.prod(self.init_dim)))
 
         self.deconv = nn.Sequential(
@@ -51,12 +53,15 @@ class Generator(nn.Module):
             nn.ConvTranspose2d(num_channels * 4, num_channels * 2, 4, 2, 1),
             nn.BatchNorm2d(num_channels * 2),
             nn.ReLU(),
-            nn.ConvTranspose2d(num_channels * 2, 1, 4, 2, 1),  # output: (B, 1, gside, gside)
+            nn.ConvTranspose2d(num_channels * 2, 1, 4, 2, 1),
         )
+        self.target_size = gside
 
     def forward(self, z):
         x = self.fc(z).view(-1, *self.init_dim)
-        return self.deconv(x)
+        x = self.deconv(x)
+        x = center_crop(x, output_size=(self.target_size, self.target_size))
+        return x
 
 
 class Discriminator(nn.Module):
