@@ -28,7 +28,7 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
         integer_columns=['credit_history_years', 'term_months', 'last_fico_range_high'],
         problem_type={"Classification": 'loan_status'},
         test_ratio=0.20,
-        save_path='./preprocess/processed.csv'):
+        save_path='./preprocess/processed_smotified.csv'):
 
     print(" Loading and processing raw dataset...")
     df = pd.read_csv(raw_path)
@@ -66,11 +66,11 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
     print(f" Saved processed data to {save_path}")
 
     os.makedirs('./preprocess/transformer', exist_ok=True)
-    with open('./preprocess/transformer/transformer.pkl', 'wb') as f:
+    with open('./preprocess/transformer/transformer_smotified.pkl', 'wb') as f:
         pickle.dump(transformer, f)
-    print(" Saved transformer to ./preprocess/transformer/transformer.pkl")
+    print(" Saved transformer to ./preprocess/transformer/transformer_smotified.pkl")
 
     os.makedirs('./preprocess/dataprep', exist_ok=True)
-    with open('./preprocess/dataprep/dataprep.pkl', 'wb') as f:
+    with open('./preprocess/dataprep/dataprep_smotified.pkl', 'wb') as f:
         pickle.dump(prep, f)
-    print("✅ Saved DataPrep object to ./preprocess/dataprep.pkl")
+    print("✅ Saved DataPrep object to ./preprocess/dataprep_smotified.pkl")
