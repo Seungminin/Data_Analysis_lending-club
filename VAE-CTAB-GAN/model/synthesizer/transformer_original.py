@@ -32,13 +32,12 @@ class DataTransformer():
     
     """    
     
-    def __init__(self, train_data=pd.DataFrame, categorical_list=[], mixed_dict={}, skewed_list=[], gaussian_list=[], n_clusters=15, eps=0.005):
+    def __init__(self, train_data=pd.DataFrame, categorical_list=[], mixed_dict={}, n_clusters=15, eps=0.005):
+        
         self.meta = None
         self.train_data = train_data
-        self.categorical_columns = categorical_list
-        self.mixed_columns = mixed_dict
-        self.skewed_columns = skewed_list
-        self.gaussian_columns = gaussian_list
+        self.categorical_columns= categorical_list
+        self.mixed_columns= mixed_dict
         self.n_clusters = n_clusters
         self.eps = eps
         self.ordering = []
@@ -49,16 +48,18 @@ class DataTransformer():
         self.meta = self.get_metadata()
         
     def get_metadata(self):
+        
         meta = []
+    
         for index in range(self.train_data.shape[1]):
-            column = self.train_data.iloc[:, index]
+            column = self.train_data.iloc[:,index]
             if index in self.categorical_columns:
                 mapper = column.value_counts().index.tolist()
                 meta.append({
-                    "name": index,
-                    "type": "categorical",
-                    "size": len(mapper),
-                    "i2s": mapper
+                        "name": index,
+                        "type": "categorical",
+                        "size": len(mapper),
+                        "i2s": mapper
                 })
             elif index in self.mixed_columns.keys():
                 meta.append({
@@ -68,91 +69,104 @@ class DataTransformer():
                     "max": column.max(),
                     "modal": self.mixed_columns[index]
                 })
-            elif index in self.skewed_columns:
-                meta.append({
-                    "name": index,
-                    "type": "skewed",
-                    "min": column.min(),
-                    "max": column.max()
-                })
-            elif index in self.gaussian_columns:
-                meta.append({
-                    "name": index,
-                    "type": "gaussian",
-                    "min": column.min(),
-                    "max": column.max()
-                })
             else:
                 meta.append({
                     "name": index,
                     "type": "continuous",
                     "min": column.min(),
-                    "max": column.max()
-                })
+                    "max": column.max(),
+                })            
+
         return meta
 
     def fit(self):
+        
         data = self.train_data.values
+        
+        # stores the corresponding bgm models for processing numeric data
         model = []
+        
+        # iterating through column information
         for id_, info in enumerate(self.meta):
-            if info['type'] in ["continuous", "skewed"]:
-                gm = BayesianGaussianMixture(n_components=self.n_clusters, 
-                                             weight_concentration_prior_type='dirichlet_process', 
-                                             weight_concentration_prior=0.001, 
-                                             covariance_type='full', 
-                                             max_iter=200, 
-                                             n_init=1, 
-                                             init_params='kmeans', 
-                                             random_state=42)
+            if info['type'] == "continuous":
+                # fitting bgm model  
+                gm = BayesianGaussianMixture(
+                    n_components=self.n_clusters, 
+                    weight_concentration_prior_type='dirichlet_process',
+                    weight_concentration_prior=0.001, # lower values result in lesser modes being active
+                    covariance_type='full',      # 다양한 형태의 분산 허용
+                    max_iter=200,n_init=1,init_params='kmeans', random_state=42)
                 gm.fit(data[:, id_].reshape([-1, 1]))
                 model.append(gm)
+                # keeping only relevant modes that have higher weight than eps and are used to fit the data
                 old_comp = gm.weights_ > self.eps
-                mode_freq = pd.Series(gm.predict(data[:, id_].reshape([-1, 1]))).value_counts().keys()
-                comp = [(i in mode_freq) and old_comp[i] for i in range(self.n_clusters)]
-                self.components.append(comp)
+                mode_freq = (pd.Series(gm.predict(data[:, id_].reshape([-1, 1]))).value_counts().keys())
+                comp = []
+                for i in range(self.n_clusters):
+                    if (i in (mode_freq)) & old_comp[i]:
+                        comp.append(True)
+                    else:
+                        comp.append(False)
+                self.components.append(comp) 
                 self.output_info += [(1, 'tanh'), (np.sum(comp), 'softmax')]
                 self.output_dim += 1 + np.sum(comp)
-            elif info["type"] == "gaussian":
-                # GMM 학습 없이 min/max만 저장
-                self.output_info += [(1, 'tanh')]
-                self.output_dim += 1
-                model.append(None)
-                self.components.append(None)
-            elif info['type'] == "mixed":
-                gm1 = BayesianGaussianMixture(n_components=self.n_clusters, 
-                                              weight_concentration_prior_type='dirichlet_process',
-                                            weight_concentration_prior=0.001, 
-                                            covariance_type='full',
-                                            max_iter=200, 
-                                            n_init=1, 
-                                            init_params='kmeans', 
-                                            random_state=42)
                 
-                gm2 = BayesianGaussianMixture(n_components=self.n_clusters, 
-                                              weight_concentration_prior_type='dirichlet_process', 
-                                              weight_concentration_prior=0.001, 
-                                              covariance_type='full', 
-                                              max_iter=200, 
-                                              n_init=1, 
-                                              init_params='kmeans', 
-                                              random_state=42)
+            elif info['type'] == "mixed":
+                
+                # in case of mixed columns, two bgm models are used
+                gm1 = BayesianGaussianMixture(
+                    n_components=self.n_clusters, 
+                    weight_concentration_prior_type='dirichlet_process',
+                    weight_concentration_prior=0.001, # lower values result in lesser modes being active
+                    covariance_type='full',      # 다양한 형태의 분산 허용
+                    max_iter=200,n_init=1,init_params='kmeans', random_state=42)
+                gm2 = BayesianGaussianMixture(
+                    n_components=self.n_clusters, 
+                    weight_concentration_prior_type='dirichlet_process',
+                    weight_concentration_prior=0.001, # lower values result in lesser modes being active
+                    covariance_type='full',      # 다양한 형태의 분산 허용
+                    max_iter=200,n_init=1,init_params='kmeans', random_state=42)
+                
+                # first bgm model is fit to the entire data only for the purposes of obtaining a normalized value of any particular categorical mode
                 gm1.fit(data[:, id_].reshape([-1, 1]))
-                filter_arr = [element not in info['modal'] for element in data[:, id_]]
+                
+                # main bgm model used to fit the continuous component and serves the same purpose as with purely numeric columns
+                filter_arr = []
+                for element in data[:, id_]:
+                    if element not in info['modal']:
+                        filter_arr.append(True)
+                    else:
+                        filter_arr.append(False)
                 self.filter_arr.append(filter_arr)
+                
                 gm2.fit(data[:, id_][filter_arr].reshape([-1, 1]))
-                model.append((gm1, gm2))
+                
+                model.append((gm1,gm2))
+                
+                # similarly keeping only relevant modes with higher weight than eps and are used to fit strictly continuous data 
                 old_comp = gm2.weights_ > self.eps
-                mode_freq = pd.Series(gm2.predict(data[:, id_][filter_arr].reshape([-1, 1]))).value_counts().keys()
-                comp = [(i in mode_freq) and old_comp[i] for i in range(self.n_clusters)]
+                mode_freq = (pd.Series(gm2.predict(data[:, id_][filter_arr].reshape([-1, 1]))).value_counts().keys())  
+                comp = []
+                  
+                for i in range(self.n_clusters):
+                    if (i in (mode_freq)) & old_comp[i]:
+                        comp.append(True)
+                    else:
+                        comp.append(False)
+
                 self.components.append(comp)
+                
+                # modes of the categorical component are appended to modes produced by the main bgm model
                 self.output_info += [(1, 'tanh'), (np.sum(comp) + len(info['modal']), 'softmax')]
                 self.output_dim += 1 + np.sum(comp) + len(info['modal'])
+            
             else:
+                # in case of categorical columns, bgm model is ignored
                 model.append(None)
                 self.components.append(None)
                 self.output_info += [(info['size'], 'softmax')]
                 self.output_dim += info['size']
-
+        
         self.model = model
 
     def transform(self, data):
@@ -166,7 +180,7 @@ class DataTransformer():
         # iterating through column information
         for id_, info in enumerate(self.meta):
             current = data[:, id_]
-            if info['type'] in ["continuous", "skewed"]:
+            if info['type'] == "continuous":
                 # mode-specific normalization occurs here
                 current = current.reshape([-1, 1])
                 # means and stds of the modes are obtained from the corresponding fitted bgm model
@@ -212,11 +226,6 @@ class DataTransformer():
                 # storing transformed numeric column represented as normalized values and corresponding modes 
                 values += [features, re_ordered_phot]
                   
-            elif info["type"] == "gaussian":
-                val = current.reshape([-1, 1])
-                norm = 2 * ((val - info['min']) / (info['max'] - info['min']) + 1e-6) - 1
-                values.append(norm)
-
             elif info['type'] == "mixed":
                 
                 # means and standard deviation of modes obtained from the first fitted bgm model
@@ -350,7 +359,7 @@ class DataTransformer():
 
         # iterating through original column information
         for id_, info in enumerate(self.meta):
-            if info['type'] in ["continuous", "skewed"]:
+            if info['type'] == "continuous":
                 
                 # obtaining the generated normalized values and clipping for stability
                 u = data[:, st]
@@ -385,13 +394,7 @@ class DataTransformer():
                 
                 # moving to the next set of columns in the raw generated data in correspondance to original column information
                 st += 1 + np.sum(self.components[id_])
-
-            elif info["type"] == "gaussian":
-                val = data[:, st]
-                val = (val + 1) / 2  # scale to 0~1
-                val = val * (info['max'] - info['min']) + info['min']
-                data_t[:, id_] = val
-                st += 1    
+                
             elif info['type'] == "mixed":
                 
                 # obtaining the generated normalized values and corresponding modes
@@ -481,3 +484,5 @@ class ImageTransformer():
         data = data.view(-1, self.height * self.height)
 
         return data
+
+

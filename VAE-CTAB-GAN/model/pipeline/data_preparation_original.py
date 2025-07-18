@@ -27,9 +27,7 @@ class DataPrep(object):
     """
 
 
-    def __init__(self, raw_df: pd.DataFrame, categorical: list, log:list, mixed:dict, 
-             integer:list, type:dict, test_ratio:float, 
-             skew_columns: list = [], single_gaussian_columns: list = []):
+    def __init__(self, raw_df: pd.DataFrame, categorical: list, log:list, mixed:dict, integer:list, type:dict, test_ratio:float):
         
         self.categorical_columns = categorical
         self.log_columns = log
@@ -38,8 +36,6 @@ class DataPrep(object):
         self.column_types = dict()
         self.column_types["categorical"] = []
         self.column_types["mixed"] = {}
-        self.column_types["skewed"] = []
-        self.column_types["gaussian"] = []
         self.lower_bounds = {}
         self.label_encoder_list = []
         self.problem_type = type
@@ -104,12 +100,6 @@ class DataPrep(object):
             
             elif column in self.mixed_columns:
                 self.column_types["mixed"][column_index] = self.mixed_columns[column]
-
-            elif column in skew_columns:
-                self.column_types["skewed"].append(column_index)
-                
-            elif column in single_gaussian_columns:
-                self.column_types["gaussian"].append(column_index)
 
         
         super().__init__()

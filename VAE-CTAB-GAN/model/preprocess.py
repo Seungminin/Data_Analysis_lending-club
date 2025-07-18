@@ -5,35 +5,52 @@ from model.synthesizer.transformer import DataTransformer
 import pickle
 
 def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
-                    categorical_columns=[
-                        'debt_settlement_flag', 'sub_grade', 'home_ownership',
-                        'purpose', 'grade', 'term_months'
-                    ],
-                    log_columns=[
-                        'annual_inc', 'revol_bal', 'avg_cur_bal', 'installment'
-                    ],
-                    mixed_columns={
-                        'last_fico_range_high': [0.0],
-                        'mo_sin_old_rev_tl_op': [0.0],
-                        'dti': [0.0],
-                        'revol_util': [0.0]
-                    },
-                    integer_columns=[
-                        'credit_history_years', 'term_months'
-                    ],
-                    problem_type={"Classification": 'loan_status'},
-                    test_ratio=0.20,
-                    save_path='./preprocess/processed.csv'):
+        categorical_columns=[
+            'purpose', 'home_ownership', 'loan_status', 'sub_grade',
+            'grade', 'term_months', 'debt_settlement_flag'
+        ],
+        log_columns=[], 
+        mixed_columns={  
+            'annual_income': [0.0]
+        },
+        single_gaussian_columns=[
+            'revol_util', 'int_rate', 'fico_range_high'
+        ],
+        skew_multi_mode_columns=[
+            'credit_history_years', 'loan_amnt', 'installment', 'dti',
+            'funded_amnt', 'total_pymnt', 'total_pymnt_inv',
+            'avg_cur_bal', 'mo_sin_old_rev_tl_op'
+        ],
+        integer_columns=['credit_history_years', 'term_months'],
+        problem_type={"Classification": 'loan_status'},
+        test_ratio=0.20,
+        save_path='./preprocess/processed.csv'):
 
     print(" Loading and processing raw dataset...")
     df = pd.read_csv(raw_path)
+    mixed_columns_combined = mixed_columns.copy()
+    for col in skew_multi_mode_columns + single_gaussian_columns:
+        mixed_columns_combined[col] = [0.0]  # mode candidate
+        
+    prep = DataPrep(
+        raw_df=df,
+        categorical=categorical_columns,
+        log=log_columns,
+        mixed=mixed_columns,
+        integer=integer_columns,
+        type=problem_type,
+        test_ratio=test_ratio,
+        skew_columns=skew_multi_mode_columns,
+        single_gaussian_columns=single_gaussian_columns
+    )
 
-    prep = DataPrep(df, categorical_columns, log_columns, mixed_columns, integer_columns, problem_type, test_ratio)
     transformed_df = prep.df
 
     transformer = DataTransformer(train_data=transformed_df,
                                   categorical_list=prep.column_types['categorical'],
-                                  mixed_dict=prep.column_types['mixed'])
+                                  mixed_dict=prep.column_types['mixed'],
+                                  skewed_list=prep.column_types['skewed'],
+                                  gaussian_list=prep.column_types['gaussian'])
     transformer.fit()
     transformed = transformer.transform(transformed_df.values)
 
@@ -53,4 +70,3 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
     with open('./preprocess/dataprep/dataprep.pkl', 'wb') as f:
         pickle.dump(prep, f)
     print("✅ Saved DataPrep object to ./preprocess/dataprep.pkl")
-
