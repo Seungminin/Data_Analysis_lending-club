@@ -66,11 +66,11 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
     print(f" Saved processed data to {save_path}")
 
     os.makedirs('./preprocess/transformer', exist_ok=True)
-    with open('./preprocess/transformer/transformer_smotified.pkl', 'wb') as f:
+    with open('./preprocess/transformer/transformer.pkl', 'wb') as f:
         pickle.dump(transformer, f)
-    print(" Saved transformer to ./preprocess/transformer/transformer_smotified.pkl")
+    print(" Saved transformer to ./preprocess/transformer/transformer.pkl")
 
     os.makedirs('./preprocess/dataprep', exist_ok=True)
-    with open('./preprocess/dataprep/dataprep_smotified.pkl', 'wb') as f:
+    with open('./preprocess/dataprep/dataprep.pkl', 'wb') as f:
         pickle.dump(prep, f)
-    print("✅ Saved DataPrep object to ./preprocess/dataprep_smotified.pkl")
+    print("✅ Saved DataPrep object to ./preprocess/dataprep.pkl")
