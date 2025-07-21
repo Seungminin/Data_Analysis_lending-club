@@ -413,7 +413,7 @@ def generate_samples(args, full_data, cont_data, device):
     tabular_data = np.where(tabular_data < 0, 0.0, tabular_data)
     recovered_df = dataprep.inverse_prep(tabular_data)  # log, label decoding, rounding 등 최종 복원
 
-    output_path = os.path.join(args.sample_dir, "generated_samples_newencoder2.csv")
+    output_path = os.path.join(args.sample_dir, "generated_samples_smotified.csv")
     recovered_df.to_csv(output_path, index=False)
     print(f"✅ Generated {args.num_samples} samples and saved to {output_path}")
 
