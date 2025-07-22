@@ -11,7 +11,7 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
         ],
         log_columns=['avg_cur_bal', 'installment', 'total_pymnt', 'total_pymnt_inv'],  #int_rate log 정규화를 통해 skew된 분포 완만하게 'int_rate'
         mixed_columns={  
-            'annual_income': [0.0],
+            'annual_inc': [0.0],
             'dti': [0.0],
             'revol_util': [0.0],
             'int_rate': [0.0],
