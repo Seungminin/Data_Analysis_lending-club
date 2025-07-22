@@ -11,6 +11,7 @@ from tqdm import tqdm
 import pickle
 import pandas as pd
 import matplotlib as plt
+import math
 
 from model.pipeline.inverse_transform import apply_activate
 from model.synthesizer.transformer import ImageTransformer, DataTransformer
@@ -156,6 +157,75 @@ def get_st_ed(target_col_index,output_info):
     ed= st+output_info[tc][0] 
     
     return (st,ed)
+
+def rounding_columns(fake_df: pd.DataFrame, real_df: pd.DataFrame, columns: list) -> pd.DataFrame:
+    """
+    특정 continuous column들에 대해 real_df에서 가장 가까운 고유값으로 rounding.
+
+    Parameters:
+    - fake_df: 생성된 복원된 DataFrame
+    - real_df: 원본 real DataFrame
+    - columns: rounding할 column 목록
+
+    Returns:
+    - rounded_df: 고유값 기반 rounding이 적용된 DataFrame
+    """
+    for col in columns:
+        if col not in fake_df.columns:
+            print(f"⚠️ Warning: '{col}' not in fake_df, skipping...")
+            continue
+
+        print(f"🔧 Rounding column: {col}")
+        fake_col = fake_df[[col]].to_numpy()
+        real_col = real_df[[col]]
+
+        # 고유값 기반 rounding (앞서 정의된 함수 사용)
+        rounded = rounding(fake_col, real_col)
+        fake_df[col] = rounded[:, 0]
+
+    return fake_df
+
+
+def rounding(fake: np.ndarray, real: pd.DataFrame, batch_size: int = 100000) -> np.ndarray:
+    """
+    모든 feature(연속형 + 범주형)에 대해 rounding을 수행하는 함수.
+
+    Parameters:
+    - fake (np.ndarray): 생성된 가짜 데이터 (n_samples, n_features)
+    - real (pd.DataFrame): 원본 데이터 (복원 기준, DataFrame 형식)
+    - batch_size (int): 배치 단위 처리 크기
+
+    Returns:
+    - fake (np.ndarray): 고유값으로 반올림된 가짜 데이터
+    """
+    if isinstance(real, np.ndarray):
+        print("⚠️ Warning: real 데이터가 numpy 배열 → DataFrame으로 변환")
+        real = pd.DataFrame(real)
+
+    num_samples, num_features = fake.shape
+
+    for col_idx in range(num_features):
+        print(f"🔧 Rounding column {col_idx}...")
+
+        # 고유값 정렬
+        unique_values = np.sort(real.iloc[:, col_idx].dropna().unique())
+        num_batches = math.ceil(num_samples / batch_size)
+
+        for batch_idx in range(num_batches):
+            start = batch_idx * batch_size
+            end = min((batch_idx + 1) * batch_size, num_samples)
+
+            batch = fake[start:end, col_idx]
+
+            # 가장 가까운 값 인덱스 찾기
+            indices = np.searchsorted(unique_values, batch, side="left")
+
+            # 범위 초과 처리
+            indices = np.clip(indices, 0, len(unique_values) - 1)
+
+            fake[start:end, col_idx] = unique_values[indices]
+
+    return fake
 
 def has_nan(tensor, name="tensor"):
     if torch.isnan(tensor).any():
@@ -413,7 +483,12 @@ def generate_samples(args, full_data, cont_data, device):
     tabular_data = np.where(tabular_data < 0, 0.0, tabular_data)
     recovered_df = dataprep.inverse_prep(tabular_data)  # log, label decoding, rounding 등 최종 복원
 
-    output_path = os.path.join(args.sample_dir, "generated_samples_pre_30epoch.csv")
-    recovered_df.to_csv(output_path, index=False)
+    columns_to_round = ['loan_amnt', 'funded_amnt', 'last_fico_range_high', 'annual_income', 'revol_util', 'dti']
+    real_data = pd.read_csv("Real_Datasets/train_category_1.csv")
+    
+    rounded_df = rounding_columns(recovered_df.copy(), real_data, columns_to_round)
+
+    output_path = os.path.join(args.sample_dir, "generated_samples_rounded.csv")
+    rounded_df.to_csv(output_path, index=False)
     print(f"✅ Generated {args.num_samples} samples and saved to {output_path}")
 

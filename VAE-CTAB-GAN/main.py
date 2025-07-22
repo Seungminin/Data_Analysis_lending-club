@@ -45,7 +45,7 @@ def parse_args():
     parser.add_argument('--preprocessed_path', type=str, default='preprocess/preprocessed.csv')
     parser.add_argument('--transformer_path', type=str, default='preprocess/transformer/transformer.pkl')
     parser.add_argument('--dataprep_path', type=str, default='preprocess/dataprep/dataprep.pkl')
-    parser.add_argument("--real_activate_until_epoch", type=int, default=30,
+    parser.add_argument("--real_activate_until_epoch", type=int, default=50,
                     help="Number of epochs to apply activation to real data for fair D comparison")
     parser.add_argument('--num_samples', type=int, default=540000)
     return parser.parse_args()

@@ -9,22 +9,22 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
             'purpose', 'home_ownership', 'loan_status', 'sub_grade',
             'grade', 'term_months', 'debt_settlement_flag'
         ],
-        log_columns=['avg_cur_bal', 'installment', 'total_pymnt', 'total_pymnt_inv', 'int_rate'],  #int_rate log 정규화를 통해 skew된 분포 완만하게
+        log_columns=['avg_cur_bal', 'installment', 'total_pymnt', 'total_pymnt_inv'],  #int_rate log 정규화를 통해 skew된 분포 완만하게 'int_rate'
         mixed_columns={  
             'annual_income': [0.0],
             'dti': [0.0],
             'revol_util': [0.0],
-            #'int_rate': [0.0],
+            'int_rate': [0.0],
             'loan_amnt' : [0.0],
-            'funded_amnt' : [0.0],
-            'last_fico_range_high': [0.0]
+            'funded_amnt' : [0.0]
+            #'last_fico_range_high': [0.0]
         },
 
         single_gaussian_columns=['int_rate'],
 
         skew_multi_mode_columns=[
-            'mo_sin_old_rev_tl_op','credit_history_years'
-            #'last_fico_range_high'
+            'mo_sin_old_rev_tl_op','credit_history_years',
+            'last_fico_range_high'
         ],
 
         integer_columns=['credit_history_years', 'term_months', 'last_fico_range_high'],
