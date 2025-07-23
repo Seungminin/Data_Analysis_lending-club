@@ -483,12 +483,12 @@ def generate_samples(args, full_data, cont_data, device):
     tabular_data = np.where(tabular_data < 0, 0.0, tabular_data)
     recovered_df = dataprep.inverse_prep(tabular_data)  # log, label decoding, rounding 등 최종 복원
 
-    columns_to_round = ['loan_amnt', 'funded_amnt', 'last_fico_range_high', 'annual_inc', 'revol_util', 'dti','installment']
+    columns_to_round = ['loan_amnt', 'funded_amnt', 'last_fico_range_high', 'annual_inc', 'revol_util', 'dti','installment', 'int_rate']
     real_data = pd.read_csv("Real_Datasets/train_category_1.csv")
     
     rounded_df = rounding_columns(recovered_df.copy(), real_data, columns_to_round)
 
-    output_path = os.path.join(args.sample_dir, "generated_samples_smotified_rounded.csv")
+    output_path = os.path.join(args.sample_dir, "generated_samples_newenconder2_rounded.csv")
     rounded_df.to_csv(output_path, index=False)
     print(f"✅ Generated {args.num_samples} samples and saved to {output_path}")
 
