@@ -159,8 +159,8 @@ def get_st_ed(target_col_index,output_info):
     return (st,ed)
 
 def rounding_columns(fake_df: pd.DataFrame, real_df: pd.DataFrame, columns: list) -> pd.DataFrame:
-    """
-    특정 continuous column들에 대해 real_df에서 가장 가까운 고유값으로 rounding.
+    
+    """특정 continuous column들에 대해 real_df에서 가장 가까운 고유값으로 rounding.
 
     Parameters:
     - fake_df: 생성된 복원된 DataFrame
@@ -168,8 +168,8 @@ def rounding_columns(fake_df: pd.DataFrame, real_df: pd.DataFrame, columns: list
     - columns: rounding할 column 목록
 
     Returns:
-    - rounded_df: 고유값 기반 rounding이 적용된 DataFrame
-    """
+    - rounded_df: 고유값 기반 rounding이 적용된 DataFrame"""
+    
     for col in columns:
         if col not in fake_df.columns:
             print(f"⚠️ Warning: '{col}' not in fake_df, skipping...")
@@ -488,7 +488,7 @@ def generate_samples(args, full_data, cont_data, device):
     
     rounded_df = rounding_columns(recovered_df.copy(), real_data, columns_to_round)
 
-    output_path = os.path.join(args.sample_dir, "portfolios.csv")
+    output_path = os.path.join(args.sample_dir, "portfolios_newrounding.csv")
     rounded_df.to_csv(output_path, index=False)
     print(f"✅ Generated {args.num_samples} samples and saved to {output_path}")
 
