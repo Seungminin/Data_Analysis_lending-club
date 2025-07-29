@@ -48,8 +48,16 @@ class DataPrep(object):
         target_col = list(type.values())[0]
         y_real = raw_df[target_col]
         X_real = raw_df.drop(columns=[target_col])
-        X_train_real, _, y_train_real, _ = model_selection.train_test_split(X_real ,y_real, test_size=test_ratio, stratify=y_real,random_state=42)        
-        X_train_real[target_col]= y_train_real
+
+        if 'classification' in type:
+            X_train_real, _, y_train_real, _ = model_selection.train_test_split(
+                X_real, y_real, test_size=test_ratio, stratify=y_real, random_state=42)
+        else:
+            X_train_real, _, y_train_real, _ = model_selection.train_test_split(
+                X_real, y_real, test_size=test_ratio, random_state=42)
+            
+        """X_train_real, _, y_train_real, _ = model_selection.train_test_split(X_real ,y_real, test_size=test_ratio, stratify=y_real,random_state=42)        
+        X_train_real[target_col]= y_train_real"""
 
         # Replacing empty strings with na if any and replace na with empty
         self.df = X_train_real
@@ -151,7 +159,8 @@ class DataPrep(object):
 
         target_col = list(self.problem_type.values())[0] if self.problem_type else None
         if target_col in df_sample.columns:
-            df_sample[target_col] = pd.to_numeric(df_sample[target_col], errors='coerce').round().astype('int64')
+            df_sample[target_col] = pd.to_numeric(df_sample[target_col], errors='coerce').round().astype('float64')
+            #int64 -> float64(expected_return)
 
         # Converting back -9999999 and "empty" to na
         df_sample.replace(-9999999, np.nan,inplace=True)
