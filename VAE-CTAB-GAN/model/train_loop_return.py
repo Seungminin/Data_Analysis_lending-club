@@ -14,7 +14,7 @@ import matplotlib as plt
 import math
 
 from model.pipeline.inverse_transform import apply_activate
-from model.synthesizer.transformer import ImageTransformer, DataTransformer
+from model.synthesizer.transformer_return import ImageTransformer, DataTransformer
 from model.condvec import Condvec
 from model.sampler import Sampler
 from model.model_return import VAEEncoder, Generator
@@ -463,7 +463,7 @@ def generate_samples(args, full_data, cont_data, device):
     output_info = transformer.output_info
 
     # Load DataPrep for inverse_prep
-    with open("preprocess/dataprep/dataprep.pkl", "rb") as f:
+    with open("preprocess/dataprep/dataprep_return.pkl", "rb") as f:
         dataprep = pickle.load(f)
 
     condvec = Condvec(full_data, output_info)
@@ -502,12 +502,12 @@ def generate_samples(args, full_data, cont_data, device):
     tabular_data = np.where(tabular_data < 0, 0.0, tabular_data)
     recovered_df = dataprep.inverse_prep(tabular_data)  # log, label decoding, rounding 등 최종 복원
 
-    columns_to_round = ['loan_amnt', 'funded_amnt', 'last_fico_range_high', 'annual_inc', 'revol_util', 'dti','installment', 'int_rate', 'total_pymnt_inv', 'total_pymnt']
+    columns_to_round = ['loan_amnt', 'funded_amnt', 'last_fico_range_high', 'annual_inc', 'revol_util', 'dti','installment', 'int_rate', 'total_pymnt_inv', 'total_pymnt','expected_return']
     real_data = pd.read_csv("Real_Datasets/target_return.csv")
     
     rounded_df = rounding_columns(recovered_df.copy(), real_data, columns_to_round)
 
-    output_path = os.path.join(args.sample_dir, "portfolios_newrounding.csv")
+    output_path = os.path.join(args.sample_dir, "target_return.csv")
     rounded_df.to_csv(output_path, index=False)
     print(f"✅ Generated {args.num_samples} samples and saved to {output_path}")
 

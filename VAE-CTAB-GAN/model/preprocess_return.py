@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from model.pipeline.data_preparation import DataPrep
-from model.synthesizer.transformer import DataTransformer
+from model.synthesizer.transformer_return import DataTransformer
 import pickle
 
 def preprocess_data(raw_path='Real_Datasets/target_return.csv',
@@ -14,12 +14,12 @@ def preprocess_data(raw_path='Real_Datasets/target_return.csv',
             'annual_inc': [0.0],
             'dti': [0.0],
             'revol_util': [0.0],
-            #'int_rate': [0.0], 
+            'int_rate': [0.0], 
             'loan_amnt' : [0.0],
             'funded_amnt' : [0.0]
         },
         
-        single_gaussian_columns=['int_rate', 'installment'],
+        single_gaussian_columns=[],
 
         skew_multi_mode_columns=[
             'mo_sin_old_rev_tl_op','credit_history_years',
@@ -27,7 +27,7 @@ def preprocess_data(raw_path='Real_Datasets/target_return.csv',
         ],
 
         integer_columns=['credit_history_years', 'term_months', 'last_fico_range_high'],
-        problem_type={"Regression": 'expected_return'},
+        problem_type={"Classification": 'loan_status'},
         test_ratio=0.20,
         save_path='./preprocess/processed_return.csv'):
 

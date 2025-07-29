@@ -14,7 +14,7 @@ from model.pipeline.data_utils import show_all_parameters
 from model.pipeline.data_preparation import DataPrep
 from model.sampler import Sampler
 from model.condvec import Condvec
-from model.synthesizer.transformer import DataTransformer
+from model.synthesizer.transformer_return import DataTransformer
 
 
 def parse_args():
@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument('--z_dim', type=int, default=64)
     parser.add_argument("--embedding_dim", type=int, default=128)
     parser.add_argument("--epochs", type=int, default=150)
-    parser.add_argument("--encoder_freeze_epoch", type=int, default=30)
+    parser.add_argument("--encoder_freeze_epoch", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--latent_dim", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-4)
