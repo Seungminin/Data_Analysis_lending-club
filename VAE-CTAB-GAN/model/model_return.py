@@ -83,7 +83,7 @@ class Discriminator(nn.Module):
         return out.view(-1, 1), h.view(h.size(0), -1)  # validity, features
 
 
-"""class Classifier(nn.Module):
+class Classifier(nn.Module):
     def __init__(self, dside, num_channels, num_classes):
         super().__init__()
         self.conv = nn.Sequential(
@@ -102,7 +102,7 @@ class Discriminator(nn.Module):
     def forward(self, x):
         h = self.conv(x)
         h = h.view(h.size(0), -1)
-        return self.fc(h)"""
+        return self.fc(h)
 
 
 class VAE_CTABGAN(nn.Module):

@@ -155,6 +155,8 @@ class DataTransformer():
 
         self.model = model
 
+        self.output_columns = list(self.train_data.columns)
+
     def transform(self, data):
         
         # stores the transformed values

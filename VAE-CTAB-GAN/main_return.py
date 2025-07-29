@@ -9,7 +9,7 @@ import numpy as np
 from model.preprocess_return import preprocess_data
 from model.pipeline.data_utils import load_processed_data, extract_continuous_features
 from model.train_loop_return import train_vae_gan, generate_samples, weights_init
-from model.model_return import VAEEncoder, Generator, Discriminator
+from model.model_return import VAEEncoder, Generator, Discriminator,Classifier
 from model.pipeline.data_utils import show_all_parameters
 from model.pipeline.data_preparation import DataPrep
 from model.sampler import Sampler
@@ -100,7 +100,7 @@ def main():
 
     generator = Generator(input_dim=g_input_dim, gside=gside, num_channels=num_channel).to(device)
     discriminator = Discriminator(dside=gside, num_channels=num_channel).to(device)
-    #classifier = Classifier(dside=gside, num_channels=num_channel, num_classes=condvec.n_opt).to(device)
+    classifier = Classifier(dside=gside, num_channels=num_channel, num_classes=condvec.n_opt).to(device)
 
     #encoder.apply(weights_init)
     generator.apply(weights_init)
@@ -108,7 +108,7 @@ def main():
     show_all_parameters(encoder, name="VAE Encoder")
     show_all_parameters(generator, name="Generator")
     show_all_parameters(discriminator, name="Discriminator")
-    #show_all_parameters(classifier, name="Classifier")
+    show_all_parameters(classifier, name="Classifier")
 
     if args.mode in ["train", "only_train"]:
         print("🚀 Starting training...")

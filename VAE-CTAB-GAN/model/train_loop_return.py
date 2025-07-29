@@ -17,7 +17,7 @@ from model.pipeline.inverse_transform import apply_activate
 from model.synthesizer.transformer_return import ImageTransformer, DataTransformer
 from model.condvec import Condvec
 from model.sampler import Sampler
-from model.model_return import VAEEncoder, Generator
+from model.model_return import VAEEncoder, Generator,Classifier
 
 def kl_divergence(mu, logvar):
     return -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
@@ -253,12 +253,12 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
     G_transformer = ImageTransformer(image_size, orig_dim=args.output_dim)
     D_transformer = ImageTransformer(image_size)
 
-    #dside = image_size  # ImageTransformer에서 쓰이는 사이즈
-    #num_channels = 64
-    #num_classes = cond_generator.n_opt
+    dside = image_size  # ImageTransformer에서 쓰이는 사이즈
+    num_channels = 64
+    num_classes = cond_generator.n_opt
 
-    #classifier = Classifier(dside=dside, num_channels=num_channels, num_classes=num_classes).to(device)
-    #optimizerC = torch.optim.Adam(classifier.parameters(), lr=args.lr)
+    classifier = Classifier(dside=dside, num_channels=num_channels, num_classes=num_classes).to(device)
+    optimizerC = torch.optim.Adam(classifier.parameters(), lr=args.lr)
 
     dataset = TensorDataset(torch.tensor(full_data, dtype=torch.float32),
                             torch.tensor(cont_data, dtype=torch.float32))
@@ -370,23 +370,13 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                                         delta_var=args.delta_var)
             
             ##cls loss
-            """if isinstance(fake_image_d, tuple):  
+            if isinstance(fake_image_d, tuple):  
                 fake_image_d = fake_image_d[0]
-            advcls_loss = F.cross_entropy(classifier(fake_image_d), torch.argmax(c, dim=1))"""
+            advcls_loss = F.cross_entropy(classifier(fake_image_d), torch.argmax(c, dim=1))
 
             recon_weight = 0.01
             kl_weight = 1.0
-            #advcls_weight = 1.0
-
-            try:
-                expected_return_idx = transformer.output_columns.index('expected_return')
-                fake_expected_return = fake_activated[:, expected_return_idx]
-                real_expected_return = x_full[:, expected_return_idx]
-                mse_loss = F.mse_loss(fake_expected_return, real_expected_return)
-            except (ValueError, IndexError) as e:
-                print(f"⚠️ expected_return not found or indexing error: {e}")
-                mse_loss = torch.tensor(0.0, requires_grad=True).to(device)
-
+            advcls_weight = 1.0
             
             ## freeze 단계에서 kl, recon 영향력 줄이기.
             total_loss = (args.g_weight * g_loss +
@@ -394,14 +384,14 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                           recon_weight * recon_loss +
                           args.cond_weight * conditional_loss +
                           args.info_weight * info_loss + 
-                          args.mse_weight * mse_loss
+                          advcls_weight * advcls_loss
                           )
 
             optimizerG.zero_grad()
-            #optimizerC.zero_grad()
+            optimizerC.zero_grad()
             total_loss.backward()
             optimizerG.step()
-            #optimizerC.step()
+            optimizerC.step()
 
             """# 학습 루프 내부에 삽입
             if step % 100 == 0 and epoch == 0:
@@ -418,9 +408,8 @@ def train_vae_gan(encoder, generator, discriminator, full_data, cont_data, args,
                     "g_loss": g_loss.item(),
                     "kl_loss": kl_loss.item(),
                     "recon_loss": recon_loss.item(),
-                    #"advcls_loss": advcls_loss.item(),
+                    "advcls_loss": advcls_loss.item(),
                     "info_loss": info_loss.item(),
-                    "mse_loss": mse_loss.item(), 
                     "cond_loss": conditional_loss.item(),
                     "total_loss": total_loss.item()
             })
