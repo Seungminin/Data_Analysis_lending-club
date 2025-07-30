@@ -9,13 +9,11 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
             'purpose', 'home_ownership', 'loan_status', 'sub_grade',
             'grade', 'term_months', 'debt_settlement_flag'
         ],
-        log_columns=['avg_cur_bal', 'installment', 'total_pymnt', 'total_pymnt_inv', 'funded_amnt', 'loan_amnt'],
+        log_columns=['avg_cur_bal', 'installment', 'total_pymnt', 'total_pymnt_inv'],  #int_rate log 정규화를 통해 skew된 분포 완만하게 'int_rate'
         mixed_columns={  
             'annual_inc': [0.0],
             'dti': [0.0],
             'revol_util': [0.0],
-            'revol_bal' : [0.0],  ##return값
-            'installment': [0.0], ##return값
             'int_rate': [0.0], 
             'loan_amnt' : [0.0],
             'funded_amnt' : [0.0]
@@ -31,7 +29,7 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
         integer_columns=['credit_history_years', 'term_months', 'last_fico_range_high'],
         problem_type={"Classification": 'loan_status'},
         test_ratio=0.20,
-        save_path='./preprocess/processed_return.csv'):
+        save_path='./preprocess/processed_smotified.csv'):
 
     print(" Loading and processing raw dataset...")
     df = pd.read_csv(raw_path)
@@ -69,11 +67,11 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
     print(f" Saved processed data to {save_path}")
 
     os.makedirs('./preprocess/transformer', exist_ok=True)
-    with open('./preprocess/transformer/transformer_return.pkl', 'wb') as f:
+    with open('./preprocess/transformer/transformer.pkl', 'wb') as f:
         pickle.dump(transformer, f)
-    print(" Saved transformer to ./preprocess/transformer/transformer_return.pkl")
+    print(" Saved transformer to ./preprocess/transformer/transformer.pkl")
 
     os.makedirs('./preprocess/dataprep', exist_ok=True)
-    with open('./preprocess/dataprep/dataprep_return.pkl', 'wb') as f:
+    with open('./preprocess/dataprep/dataprep.pkl', 'wb') as f:
         pickle.dump(prep, f)
-    print("✅ Saved DataPrep object to ./preprocess/dataprep_return.pkl")
+    print("✅ Saved DataPrep object to ./preprocess/dataprep.pkl")

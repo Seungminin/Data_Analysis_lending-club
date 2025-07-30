@@ -488,7 +488,7 @@ def generate_samples(args, full_data, cont_data, device):
     
     rounded_df = rounding_columns(recovered_df.copy(), real_data, columns_to_round)
 
-    output_path = os.path.join(args.sample_dir, "portfolios_newrounding.csv")
+    output_path = os.path.join(args.sample_dir, "return_encoder.csv")
     rounded_df.to_csv(output_path, index=False)
     print(f"✅ Generated {args.num_samples} samples and saved to {output_path}")
 

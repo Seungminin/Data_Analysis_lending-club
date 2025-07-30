@@ -465,10 +465,10 @@ def generate_samples(args, full_data, cont_data, device):
 
     checkpoint_path = os.path.join(args.checkpoint_dir, args.save_name)
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    #encoder.load_state_dict(checkpoint['encoder_state_dict']) ## 1epoch할 때는 encoder_state_dict
-    #generator.load_state_dict(checkpoint['generator_state_dict'])
-    encoder.load_state_dict(checkpoint['encoder']) ## 1epoch할 때는 encoder_state_dict
-    generator.load_state_dict(checkpoint['generator'])
+    encoder.load_state_dict(checkpoint['encoder_state_dict']) ## 1epoch할 때는 encoder_state_dict
+    generator.load_state_dict(checkpoint['generator_state_dict'])
+    #encoder.load_state_dict(checkpoint['encoder']) ## 1epoch할 때는 encoder_state_dict
+    #generator.load_state_dict(checkpoint['generator'])
     encoder.eval()
     generator.eval()
 
