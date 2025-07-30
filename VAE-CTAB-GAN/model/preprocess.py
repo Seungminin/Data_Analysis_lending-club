@@ -9,23 +9,20 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
             'purpose', 'home_ownership', 'loan_status', 'sub_grade',
             'grade', 'term_months', 'debt_settlement_flag'
         ],
-        log_columns=['avg_cur_bal', 'installment', 'total_pymnt', 'total_pymnt_inv', 'funded_amnt', 'loan_amnt'],
+        log_columns=['avg_cur_bal', 'total_pymnt', 'total_pymnt_inv', 'annual_inc', 'revol_bal','dti'],
         mixed_columns={  
             'annual_inc': [0.0],
             'dti': [0.0],
-            'revol_util': [0.0],
-            'revol_bal' : [0.0],  ##return값
-            'installment': [0.0], ##return값
+            #'revol_util': [0.0],
             'int_rate': [0.0], 
             'loan_amnt' : [0.0],
             'funded_amnt' : [0.0]
         },
         
-        single_gaussian_columns=[],
+        single_gaussian_columns=['revol_util'],
 
         skew_multi_mode_columns=[
-            'mo_sin_old_rev_tl_op','credit_history_years',
-            'last_fico_range_high'
+            'credit_history_years','last_fico_range_high'
         ],
 
         integer_columns=['credit_history_years', 'term_months', 'last_fico_range_high'],
