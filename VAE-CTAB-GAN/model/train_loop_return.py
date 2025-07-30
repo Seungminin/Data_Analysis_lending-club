@@ -492,7 +492,7 @@ def generate_samples(args, full_data, cont_data, device):
     recovered_df = dataprep.inverse_prep(tabular_data)  # log, label decoding, rounding 등 최종 복원
 
     columns_to_round = ['loan_amnt', 'funded_amnt', 'last_fico_range_high', 'annual_inc', 'revol_util', 'dti','installment', 'int_rate', 'total_pymnt_inv', 'total_pymnt','expected_return']
-    real_data = pd.read_csv("Real_Datasets/target_return.csv")
+    real_data = pd.read_csv("Real_Datasets/expected_return.csv")
     
     rounded_df = rounding_columns(recovered_df.copy(), real_data, columns_to_round)
 

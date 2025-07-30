@@ -39,7 +39,7 @@ def parse_args():
     parser.add_argument('--cond_weight', type=float, default=1.0, help='Weight for conditional loss')
     parser.add_argument("--wandb_project", type=str, default="vae-ctab-gan")
     parser.add_argument("--wandb_run", type=str, default="joint-training")
-    parser.add_argument('--dataset_path', type=str, default='Real_Datasets/target_return.csv')
+    parser.add_argument('--dataset_path', type=str, default='Real_Datasets/expected_return.csv')
     parser.add_argument('--sample_dir', type=str, default='samples')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
     parser.add_argument('--save_name', type=str, default='target_return.pt')

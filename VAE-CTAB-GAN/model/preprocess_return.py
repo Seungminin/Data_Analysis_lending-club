@@ -4,26 +4,27 @@ from model.pipeline.data_preparation import DataPrep
 from model.synthesizer.transformer_return import DataTransformer
 import pickle
 
-def preprocess_data(raw_path='Real_Datasets/target_return.csv',
+def preprocess_data(raw_path='Real_Datasets/expected_return.csv',
         categorical_columns=[
             'purpose', 'home_ownership', 'loan_status', 'sub_grade',
             'grade', 'term_months', 'debt_settlement_flag'
         ],
-        log_columns=['avg_cur_bal', 'installment', 'total_pymnt', 'total_pymnt_inv'],  #int_rate log 정규화를 통해 skew된 분포 완만하게 'int_rate'
+        log_columns=['avg_cur_bal', 'installment', 'total_pymnt', 'total_pymnt_inv',
+                     'funded_amnt', 'loan_amnt'],  #int_rate log 정규화를 통해 skew된 분포 완만하게 'int_rate'
         mixed_columns={  
             'annual_inc': [0.0],
             'dti': [0.0],
-            'revol_util': [0.0],
+            #'revol_util': [0.0],
             'int_rate': [0.0], 
             'loan_amnt' : [0.0],
             'funded_amnt' : [0.0]
         },
         
-        single_gaussian_columns=[],
+        single_gaussian_columns=["expected_return"],
 
         skew_multi_mode_columns=[
             'mo_sin_old_rev_tl_op','credit_history_years',
-            'last_fico_range_high'
+            'last_fico_range_high','revol_util'
         ],
 
         integer_columns=['credit_history_years', 'term_months', 'last_fico_range_high'],
