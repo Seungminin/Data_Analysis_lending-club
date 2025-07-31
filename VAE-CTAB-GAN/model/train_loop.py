@@ -444,7 +444,7 @@ def generate_samples(args, full_data, cont_data, device):
     output_info = transformer.output_info
 
     # Load DataPrep for inverse_prep
-    with open("preprocess/dataprep/dataprep.pkl", "rb") as f:
+    with open("preprocess/dataprep/dataprep_smotified.pkl", "rb") as f:
         dataprep = pickle.load(f)
 
     condvec = Condvec(full_data, output_info)
@@ -493,11 +493,11 @@ def generate_samples(args, full_data, cont_data, device):
     """columns_to_round = ['loan_amnt', 'funded_amnt', 'last_fico_range_high', 'annual_inc','revol_bal',
                          'revol_util', 'dti','installment', 'int_rate', 'total_pymnt_inv', 'total_pymnt']"""
     
-    real_data = pd.read_csv("Real_Datasets/train_category_1.csv")
+    real_data = pd.read_csv("Real_Datasets/smotified_1.csv")
     
     rounded_df = rounding_columns(recovered_df.copy(), real_data, columns_to_round)
 
-    output_path = os.path.join(args.sample_dir, "dream_best.csv")
+    output_path = os.path.join(args.sample_dir, "smotified.csv")
     rounded_df.to_csv(output_path, index=False)
     print(f"✅ Generated {args.num_samples} samples and saved to {output_path}")
 
