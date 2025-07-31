@@ -42,9 +42,9 @@ def parse_args():
     parser.add_argument('--sample_dir', type=str, default='samples')
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints')
     parser.add_argument('--save_name', type=str, default='vae_ctabgan.pt')
-    parser.add_argument('--preprocessed_path', type=str, default='preprocess/preprocessed_return.csv')
-    parser.add_argument('--transformer_path', type=str, default='preprocess/transformer/transformer_return.pkl')
-    parser.add_argument('--dataprep_path', type=str, default='preprocess/dataprep/dataprep_return.pkl')
+    parser.add_argument('--preprocessed_path', type=str, default='preprocess/preprocessed.csv')
+    parser.add_argument('--transformer_path', type=str, default='preprocess/transformer/transformer.pkl')
+    parser.add_argument('--dataprep_path', type=str, default='preprocess/dataprep/dataprep.pkl')
     parser.add_argument("--real_activate_until_epoch", type=int, default=50,
                     help="Number of epochs to apply activation to real data for fair D comparison")
     parser.add_argument('--num_samples', type=int, default=540000)
