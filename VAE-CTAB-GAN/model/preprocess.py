@@ -4,7 +4,7 @@ from model.pipeline.data_preparation import DataPrep
 from model.synthesizer.transformer import DataTransformer
 import pickle
 
-def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
+def preprocess_data(raw_path='Real_Datasets/smotified_1.csv',
         categorical_columns=[
             'purpose', 'home_ownership', 'loan_status', 'sub_grade',
             'grade', 'term_months', 'debt_settlement_flag'
