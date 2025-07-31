@@ -444,7 +444,7 @@ def generate_samples(args, full_data, cont_data, device):
     output_info = transformer.output_info
 
     # Load DataPrep for inverse_prep
-    with open("preprocess/dataprep/dataprep.pkl", "rb") as f:
+    with open("preprocess/dataprep/dataprep_return.pkl", "rb") as f:
         dataprep = pickle.load(f)
 
     condvec = Condvec(full_data, output_info)
@@ -479,6 +479,9 @@ def generate_samples(args, full_data, cont_data, device):
             samples.append(fake_tabular.cpu().numpy())
 
     final_samples = np.concatenate(samples, axis=0)[:args.num_samples]
+    fake_tabular = transformer_G.inverse_transform(fake_image)
+    print("Generator output shape:", fake_tabular.shape[1])  # 예: 210
+
     tabular_data = transformer.inverse_transform(final_samples)  # One-hot → numeric/categorical 복원
     tabular_data = np.where(tabular_data < 0, 0.0, tabular_data)
     recovered_df = dataprep.inverse_prep(tabular_data)  # log, label decoding, rounding 등 최종 복원

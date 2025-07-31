@@ -13,13 +13,13 @@ def preprocess_data(raw_path='Real_Datasets/train_category_1.csv',
         mixed_columns={  
             'annual_inc': [0.0],
             'dti': [0.0],
-            #'revol_util': [0.0],
+            'revol_util': [0.0],
             'int_rate': [0.0], 
             'loan_amnt' : [0.0],
             'funded_amnt' : [0.0]
         },
         
-        single_gaussian_columns=['revol_util'],
+        single_gaussian_columns=[],
 
         skew_multi_mode_columns=[
             'credit_history_years','last_fico_range_high'
